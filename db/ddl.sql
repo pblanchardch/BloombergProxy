@@ -262,6 +262,28 @@ CREATE OR REPLACE VIEW silver.timeseries_current AS
   FROM silver.timeseries_value
   WHERE superseded_at IS NULL;
 
+CREATE TABLE IF NOT EXISTS silver.corporate_action (
+  row_id        STRING        NOT NULL,
+  instrument_id STRING        NOT NULL,
+  source        STRING        NOT NULL COMMENT 'BLOOMBERG oder Anbieter',
+  event_key     STRING        NOT NULL COMMENT 'Kennung des Ereignisses bei der Quelle',
+  action_type   STRING        NOT NULL,
+  status        STRING        NOT NULL,
+  ex_date       DATE          NOT NULL,
+  pay_date      DATE,
+  amount        DECIMAL(18,6),
+  currency      STRING,
+  ratio         DECIMAL(18,6) COMMENT 'z. B. 2 für einen Split 2:1',
+  request_id    STRING,
+  recorded_at   TIMESTAMP     NOT NULL,
+  superseded_at TIMESTAMP     COMMENT 'NULL = aktueller Stand dieser Meldung',
+  CONSTRAINT pk_corporate_action PRIMARY KEY (row_id),
+  CONSTRAINT fk_ca_instrument FOREIGN KEY (instrument_id) REFERENCES app.instrument,
+  CONSTRAINT ck_ca_type   CHECK (action_type IN ('DVD_CASH','STOCK_SPLIT','RIGHTS_ISSUE','MERGER','NAME_CHANGE','OTHER')),
+  CONSTRAINT ck_ca_status CHECK (status IN ('ANNOUNCED','CONFIRMED','CANCELLED'))
+) CLUSTER BY (instrument_id, ex_date)
+  COMMENT 'Corporate Actions je Quelle, bitemporal (A2); Golden Copy über die Rangfolge der Quellen';
+
 CREATE TABLE IF NOT EXISTS silver.identifier_xref (
   scheme        STRING    NOT NULL COMMENT 'ISIN, FIGI, CUSIP, SEDOL, TICKER oder Anbieter-Kennung (z. B. MSCI_ID)',
   value         STRING    NOT NULL,
@@ -319,6 +341,6 @@ CREATE TABLE IF NOT EXISTS gold.dq_exception (
   handled_by    STRING,
   handled_at    TIMESTAMP,
   CONSTRAINT pk_dq_exception PRIMARY KEY (exception_id),
-  CONSTRAINT ck_dq_type   CHECK (type IN ('STALE_PRICE','OUTLIER','MISSING_VALUE','SOURCE_MISMATCH','ID_CONFLICT')),
+  CONSTRAINT ck_dq_type   CHECK (type IN ('STALE_PRICE','OUTLIER','MISSING_VALUE','SOURCE_MISMATCH','ID_CONFLICT','CA_MISMATCH')),
   CONSTRAINT ck_dq_status CHECK (status IN ('OPEN','ACKNOWLEDGED','RESOLVED'))
 ) COMMENT 'Datenqualitäts-Ausnahmen (D1)';

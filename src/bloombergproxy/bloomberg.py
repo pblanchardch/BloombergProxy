@@ -36,10 +36,24 @@ class Record:
 
 
 @dataclass(frozen=True)
+class CorporateAction:
+    identifier: str
+    event_key: str  # Kennung des Ereignisses bei der Quelle
+    action_type: str  # DVD_CASH, STOCK_SPLIT, RIGHTS_ISSUE, MERGER, NAME_CHANGE, OTHER
+    status: str  # ANNOUNCED, CONFIRMED, CANCELLED
+    ex_date: date
+    pay_date: date | None = None
+    amount: Decimal | None = None
+    currency: str | None = None
+    ratio: Decimal | None = None  # z. B. 2 für einen Split 2:1
+
+
+@dataclass(frozen=True)
 class Delivery:
     request_id: str
     records: list[Record]
     errors: dict[str, str]  # Identifier -> Fehlercode, z. B. INVALID_SECURITY
+    actions: list[CorporateAction] = field(default_factory=list)
 
 
 class BloombergClient(Protocol):
@@ -53,6 +67,10 @@ class BloombergClient(Protocol):
 
     def request_history(self, identifiers: list[str], fields: list[str], start: date, end: date) -> str:
         """Fordert historische Werte (Backfill, C2) für Werktage von ``start`` bis ``end`` an."""
+        ...
+
+    def request_corporate_actions(self, identifiers: list[str], start: date, end: date) -> str:
+        """Fordert Corporate Actions (A2) mit Ex-Datum von ``start`` bis ``end`` an."""
         ...
 
     def fetch(self, request_id: str) -> Delivery | None:
@@ -95,6 +113,7 @@ class MockBloombergClient:
     requests: list[tuple[str, UniverseChange]] = field(default_factory=list)
     # Request-ID -> (Felder je Identifier, Stichtage, Tageslieferung mit Korrekturen?)
     _pending: dict[str, tuple[dict[str, list[str]], list[date], bool]] = field(default_factory=dict)
+    _ca_pending: dict[str, tuple[list[str], date, date]] = field(default_factory=dict)
 
     def _new(self, fields_by_identifier: dict[str, list[str]], dates: list[date], snapshot: bool) -> str:
         request_id = f"mock-{uuid.uuid4().hex[:12]}"
@@ -113,7 +132,39 @@ class MockBloombergClient:
         days = [start + timedelta(days=n) for n in range((end - start).days + 1)]
         return self._new({i: fields for i in identifiers}, [d for d in days if d.weekday() < 5], False)
 
+    def request_corporate_actions(self, identifiers: list[str], start: date, end: date) -> str:
+        request_id = f"mock-{uuid.uuid4().hex[:12]}"
+        self._ca_pending[request_id] = (identifiers, start, end)
+        return request_id
+
+    def _actions(self, identifier: str, start: date, end: date) -> list[CorporateAction]:
+        """Quartalsdividenden für rund 70 % der Instrumente, ein Split für rund 10 % pro Jahr."""
+        today = self.clock().date()
+        status = lambda ex: "CONFIRMED" if ex <= today else "ANNOUNCED"  # noqa: E731
+        _, code = parse_identifier(identifier)
+        result = []
+        for year in range(start.year, end.year + 1):
+            if _unit(identifier, "dividend") < 0.7:
+                for month in (3, 6, 9, 12):
+                    ex = date(year, month, 10 + int(_unit(identifier, "exday") * 15))
+                    if start <= ex <= end:
+                        result.append(CorporateAction(
+                            identifier, f"BBG-DVD-{code}-{ex:%Y%m}", "DVD_CASH", status(ex), ex,
+                            pay_date=ex + timedelta(days=3),
+                            amount=Decimal(str(round(0.2 + 2 * _unit(identifier, "amount", year), 2))),
+                            currency="CHF" if code.startswith("CH") else "USD"))
+            if _unit(identifier, "split", year) < 0.1:
+                ex = date(year, 1, 1) + timedelta(days=int(_unit(identifier, "splitday", year) * 360))
+                if start <= ex <= end:
+                    result.append(CorporateAction(identifier, f"BBG-SPL-{code}-{ex:%Y%m%d}", "STOCK_SPLIT",
+                                                  status(ex), ex, ratio=Decimal(2)))
+        return result
+
     def fetch(self, request_id: str) -> Delivery | None:
+        if request_id in self._ca_pending:
+            identifiers, start, end = self._ca_pending.pop(request_id)
+            valid = [i for i in identifiers if parse_identifier(i)[0] != "ISIN" or valid_isin(parse_identifier(i)[1])]
+            return Delivery(request_id, [], {}, [a for i in valid for a in self._actions(i, start, end)])
         if request_id not in self._pending:
             return None
         fields_by_identifier, dates, snapshot = self._pending.pop(request_id)

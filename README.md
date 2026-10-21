@@ -100,12 +100,24 @@ in Schweizer Schreibweise (`1'250.50`). Trennzeichen und Spaltennamen sind über
   (`BBGPROXY_DQ_SOURCE_TOLERANCE`); `ID_CONFLICT`, wenn eine Kennung zwei Instrumenten
   zugeordnet würde (die Zuordnung bleibt dann unverändert).
 
+## Corporate Actions (A2)
+
+- Bloomberg-Ereignisse kommen im Tageslauf (Ex-Datum 7 Tage zurück bis 90 Tage voraus), andere
+  Anbieter per CSV (`POST /api/v1/vendors/{anbieter}/corporate-actions`).
+- Jede Meldung wird je Quelle bitemporal gespeichert (`silver.corporate_action`).
+- Golden Copy (`GET /api/v1/corporate-actions`): Meldungen zum selben Instrument, derselben Art
+  und demselben Ex-Datum bilden ein Ereignis; massgebend ist die ranghöchste Quelle. Abweichende
+  Beträge, Verhältnisse, Zahltage oder Status ergeben die Ausnahme `CA_MISMATCH`.
+- Ein Split am Ex-Tag erklärt den Preissprung: dann keine `OUTLIER`-Ausnahme.
+- Neue oder geänderte Splits und annullierte Ereignisse werden gemeldet.
+
 ## Bloomberg-Mock
 
 Bis Zugangsdaten und Katalog-ID der Data License vorliegen, spricht der Service mit
 `MockBloombergClient` (`src/bloombergproxy/bloomberg.py`). Der Mock ruft Bloomberg nicht auf und
 
-- liefert deterministische Werte für `PX_LAST`, `PX_VOLUME`, `NAME`, `CRNCY`, `ESG_SCORE`,
+- liefert deterministische Werte für `PX_LAST`, `PX_VOLUME`, `NAME`, `CRNCY`, `ESG_SCORE` und die
+  Stammdatenfelder, dazu Quartalsdividenden (rund 70 % der Instrumente) und gelegentliche Splits,
 - meldet ISINs mit falscher Prüfziffer als `INVALID_SECURITY` (sie werden nicht abgerechnet),
 - korrigiert bei der Tageslieferung gelegentlich den Vortagespreis, damit Stichtagsabfragen
   etwas zu zeigen haben.

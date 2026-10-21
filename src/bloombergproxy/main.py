@@ -11,6 +11,7 @@ from .api import router
 from .auth import EntraVerifier
 from .bloomberg import BloombergClient, MockBloombergClient
 from .config import Settings
+from .corporate_actions import CorporateActions
 from .db import make_engine
 from .entitlements import Entitlements
 from .quality import DataQuality
@@ -40,6 +41,7 @@ def create_app(settings: Settings | None = None, bloomberg: BloombergClient | No
     app.state.quality = DataQuality(app.state.service)
     app.state.entitlements = Entitlements(app.state.service)
     app.state.vendors = VendorImport(app.state.service)
+    app.state.corporate_actions = CorporateActions(app.state.service)
     app.include_router(router)
 
     @app.middleware("http")

@@ -23,6 +23,7 @@
   <button data-tab="order">Bestellen</button>
   <button data-tab="approvals">Freigaben</button>
   <button data-tab="costs">Kosten</button>
+  <button data-tab="actions">Corporate Actions</button>
   <button data-tab="quality">Datenqualität</button>
   <button data-tab="messages">Meldungen</button>
 </nav>
@@ -52,7 +53,7 @@
       <summary>Daten anderer Anbieter (Rolle lizenz.admin)</summary>
       <form id="v-form" class="row">
         <label>Anbieter <input id="v-name" placeholder="z. B. MSCI" required></label>
-        <label>Art <select id="v-kind"><option value="values">Werte (Kennungstyp;Kennung;Datum;Feld;Wert)</option><option value="xref">Zuordnung (Kennungstyp;Kennung;ISIN)</option></select></label>
+        <label>Art <select id="v-kind"><option value="values">Werte (Kennungstyp;Kennung;Datum;Feld;Wert)</option><option value="corporate-actions">Corporate Actions</option><option value="xref">Zuordnung (Kennungstyp;Kennung;ISIN)</option></select></label>
         <label>Datei (CSV) <input id="v-file" type="file" accept=".csv,text/csv"></label>
         <button>Importieren</button>
       </form>
@@ -115,6 +116,17 @@
       <tbody id="c-rows"></tbody>
     </table>
     <div id="c-usage"></div>
+  </section>
+  <section id="actions" hidden>
+    <form id="ca-form" class="row">
+      <label>Ex-Datum von <input id="ca-from" type="date"></label>
+      <label>bis <input id="ca-to" type="date"></label>
+      <button>Anzeigen</button>
+    </form>
+    <table>
+      <thead><tr><th>Ex-Datum</th><th>Instrument</th><th>Art</th><th>Status</th><th>Betrag / Verhältnis</th><th>Zahltag</th><th>Quellen</th></tr></thead>
+      <tbody id="ca-rows"></tbody>
+    </table>
   </section>
   <section id="quality" hidden>
     <form id="dq-form" class="row">

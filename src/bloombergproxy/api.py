@@ -27,6 +27,7 @@ from .models import (
     TimeSeries,
     UsageEntry,
 )
+from .corporate_actions import CorporateActions, GoldenAction
 from .entitlements import Entitlement, Entitlements, UsageByCategory
 from .jobs import daily_run
 from .quality import DataQuality, DqException, StatusChange
@@ -102,6 +103,13 @@ def vendor_import(request: Request) -> VendorImport:
 
 
 Vend = Annotated[VendorImport, Depends(vendor_import)]
+
+
+def corporate_actions_dep(request: Request) -> CorporateActions:
+    return request.app.state.corporate_actions
+
+
+Ca = Annotated[CorporateActions, Depends(corporate_actions_dep)]
 Dq = Annotated[DataQuality, Depends(quality)]
 Reader = Annotated[User, Depends(require("lizenz.read"))]
 Orderer = Annotated[User, Depends(require("lizenz.order"))]
@@ -243,9 +251,25 @@ def entitlement_usage(ent: Ent, _: Admin, month: Annotated[str, Query(pattern=r"
 
 
 @router.post("/deliveries/run")
-def run_delivery(rec: Rec, dq: Dq, user: Admin):
+def run_delivery(rec: Rec, dq: Dq, ca: Ca, user: Admin):
     """Tageslauf auslösen (im Betrieb zeitgesteuert): Xentis-Abgleich, Lieferungen, Datenqualität."""
-    return daily_run(rec, dq, user.name)
+    return daily_run(rec, dq, user.name, ca)
+
+
+@router.get("/corporate-actions", response_model=list[GoldenAction])
+def corporate_actions(ca: Ca, _: Reader, instrument_id: Annotated[str | None, Query(alias="instrumentId")] = None,
+                      start: Annotated[date | None, Query(alias="from")] = None,
+                      end: Annotated[date | None, Query(alias="to")] = None, source: str | None = None):
+    """Golden Copy der Corporate Actions (A2); mit ``source`` nur die Meldungen dieser Quelle."""
+    return ca.query(instrument_id, start, end, source)
+
+
+@router.post("/vendors/{vendor}/corporate-actions")
+async def vendor_corporate_actions(vendor: str, request: Request, ca: Ca, user: Admin,
+                                   file_name: Annotated[str, Query(alias="fileName")] = "upload.csv"):
+    """Corporate Actions eines Anbieters (CSV: Kennungstyp;Kennung;EreignisId;Art;Status;ExDatum;
+    Zahltag;Betrag;Waehrung;Verhaeltnis)."""
+    return ca.import_csv(vendor, await _csv_body(request), file_name, user.name)
 
 
 @router.get("/data-quality/exceptions", response_model=list[DqException])

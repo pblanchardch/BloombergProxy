@@ -78,7 +78,8 @@ class DataQuality:
         found: list[dict | None] = []
         if len(rows) >= 2:
             current, previous = Decimal(rows[0][1]), Decimal(rows[1][1])
-            if previous and abs(current / previous - 1) > Decimal(str(self.settings.dq_outlier_share)):
+            if (previous and abs(current / previous - 1) > Decimal(str(self.settings.dq_outlier_share))
+                    and not self._split_between(conn, instrument_id, rows[1][0], rows[0][0])):
                 found.append(self._add(conn, "OUTLIER", instrument_id, PRICE_FIELD, as_of,
                                        f"{previous.normalize():f} -> {current.normalize():f} ({(current / previous - 1):+.1%})"))
         found += self._check_sources(conn, instrument_id, as_of)
@@ -87,6 +88,14 @@ class DataQuality:
             found.append(self._add(conn, "STALE_PRICE", instrument_id, PRICE_FIELD, as_of,
                                    f"Seit {n} Liefertagen unverändert {Decimal(rows[0][1]).normalize():f}"))
         return found
+
+    @staticmethod
+    def _split_between(conn: Connection, instrument_id: str, after: date, until: date) -> bool:
+        """Ein Split erklärt einen Preissprung (A2): dann kein OUTLIER."""
+        c = db.corporate_action.c
+        return conn.execute(select(c.row_id).where(
+            c.instrument_id == instrument_id, c.action_type == "STOCK_SPLIT", c.status != "CANCELLED",
+            c.superseded_at.is_(None), c.ex_date > after, c.ex_date <= until)).first() is not None
 
     def _check_sources(self, conn: Connection, instrument_id: str, as_of: date) -> list[dict | None]:
         """SOURCE_MISMATCH: Quellen weichen beim Preis um mehr als ``dq_source_tolerance`` ab."""

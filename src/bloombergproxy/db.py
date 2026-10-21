@@ -248,6 +248,25 @@ timeseries_value = Table(
     schema="silver",
 )
 
+corporate_action = Table(
+    "corporate_action", metadata,
+    Column("row_id", String, primary_key=True),
+    Column("instrument_id", String, nullable=False),
+    Column("source", String, nullable=False),
+    Column("event_key", String, nullable=False),
+    Column("action_type", String, nullable=False),
+    Column("status", String, nullable=False),
+    Column("ex_date", Date, nullable=False),
+    Column("pay_date", Date),
+    Column("amount", Numeric(18, 6)),
+    Column("currency", String),
+    Column("ratio", Numeric(18, 6)),
+    Column("request_id", String),
+    Column("recorded_at", DateTime, nullable=False),
+    Column("superseded_at", DateTime),
+    schema="silver",
+)
+
 issuer = Table(
     "issuer", metadata,
     Column("issuer_id", String, primary_key=True),

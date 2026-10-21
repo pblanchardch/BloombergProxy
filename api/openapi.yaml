@@ -257,6 +257,54 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
+  /corporate-actions:
+    get:
+      tags: [Zeitreihen]
+      summary: Corporate Actions, Golden Copy (A2)
+      description: |
+        Meldungen verschiedener Quellen zum selben Instrument, derselben Art und demselben Ex-Datum
+        bilden ein Ereignis; massgebend ist die Quelle mit dem höchsten Rang. ``mismatch`` nennt
+        abweichende Attribute (zusätzlich Datenqualitäts-Ausnahme CA_MISMATCH).
+      parameters:
+        - { name: instrumentId, in: query, schema: { type: string } }
+        - { name: from, in: query, schema: { type: string, format: date }, description: Ex-Datum ab }
+        - { name: to, in: query, schema: { type: string, format: date }, description: Ex-Datum bis }
+        - { name: source, in: query, schema: { type: string }, description: Nur Meldungen dieser Quelle }
+      responses:
+        '200':
+          description: Ereignisse nach Ex-Datum
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/CorporateAction' } }
+
+  /vendors/{vendor}/corporate-actions:
+    post:
+      tags: [Zeitreihen]
+      summary: Corporate Actions eines Anbieters importieren (A2)
+      description: |
+        CSV mit Kopfzeile Kennungstyp;Kennung;EreignisId;Art;Status;ExDatum;Zahltag;Betrag;Waehrung;Verhaeltnis.
+        Art: DVD_CASH, STOCK_SPLIT, RIGHTS_ISSUE, MERGER, NAME_CHANGE, OTHER. Status: ANNOUNCED,
+        CONFIRMED, CANCELLED. Rolle lizenz.admin.
+      parameters:
+        - { name: vendor, in: path, required: true, schema: { type: string, pattern: '^[A-Za-z][A-Za-z0-9_]{1,19}$' } }
+        - { name: fileName, in: query, schema: { type: string } }
+      requestBody: { required: true, content: { text/csv: { schema: { type: string } } } }
+      responses:
+        '200':
+          description: Ergebnis
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  vendor: { type: string }
+                  new: { type: integer }
+                  changed: { type: integer }
+                  mismatches: { type: integer }
+                  skipped: { type: array, items: { type: object } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
   /field-sets:
     get:
       tags: [Katalog]
@@ -452,7 +500,7 @@ paths:
       summary: Letzte Benachrichtigungen (D4)
       description: |
         Ereignisse: ORDER_PENDING_APPROVAL, ORDER_REJECTED, DELIVERY_ERRORS, RECONCILE_BLOCKED,
-        DQ_EXCEPTIONS, DAILY_RUN_FAILED. Versand per Webhook (Teams-Karte oder JSON) nach dem Commit.
+        DQ_EXCEPTIONS, DAILY_RUN_FAILED, ID_CONFLICT, CORPORATE_ACTION (Splits, Annullierungen). Versand per Webhook (Teams-Karte oder JSON) nach dem Commit.
       parameters:
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 100 } }
       responses:
@@ -616,6 +664,20 @@ components:
         pricePerInstrument: { type: number }
         currency: { type: string, example: CHF }
         validFrom: { type: string, format: date }
+    CorporateAction:
+      type: object
+      properties:
+        instrumentId: { type: string }
+        actionType: { type: string, enum: [DVD_CASH, STOCK_SPLIT, RIGHTS_ISSUE, MERGER, NAME_CHANGE, OTHER] }
+        exDate: { type: string, format: date }
+        status: { type: string, enum: [ANNOUNCED, CONFIRMED, CANCELLED] }
+        payDate: { type: [string, 'null'], format: date }
+        amount: { type: [string, 'null'] }
+        currency: { type: [string, 'null'] }
+        ratio: { type: [string, 'null'] }
+        source: { type: string, description: Massgebende Quelle }
+        sources: { type: array, items: { type: string } }
+        mismatch: { type: array, items: { type: string, enum: [status, pay_date, amount, currency, ratio] } }
     ImportResult:
       type: object
       properties:
@@ -710,7 +772,7 @@ components:
       type: object
       properties:
         id: { type: string }
-        type: { type: string, enum: [STALE_PRICE, OUTLIER, MISSING_VALUE, SOURCE_MISMATCH, ID_CONFLICT] }
+        type: { type: string, enum: [STALE_PRICE, OUTLIER, MISSING_VALUE, SOURCE_MISMATCH, ID_CONFLICT, CA_MISMATCH] }
         instrumentId: { type: string }
         field: { type: string }
         date: { type: string, format: date }
