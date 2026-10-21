@@ -1,0 +1,442 @@
+openapi: 3.1.0
+info:
+  title: Bloomberg Datenlizenz-Management API
+  version: 0.1.0
+  description: |
+    API des Lizenz-Service: Instrumente bestellen und abbestellen, Freigaben (4-Augen ab 200 CHF),
+    Kostentransparenz, Zeitreihen und Governance. Basis ist die Bloomberg Data License (ohne DL+);
+    Daten und Zeitreihen liegen in Databricks.
+    Anforderungs-IDs (B-01, A1, ...) verweisen auf den Anforderungskatalog.
+servers:
+  - url: https://lizenz-service.example.internal/api/v1
+security:
+  - oauth2: []
+
+tags:
+  - name: Instrumente
+  - name: Bestellungen
+  - name: Kosten
+  - name: Zeitreihen
+  - name: Katalog
+  - name: Universum
+  - name: Governance
+
+paths:
+  /instruments:
+    get:
+      tags: [Instrumente]
+      summary: Instrumente im Bloomberg-Universum auflisten (B-01, B-02)
+      parameters:
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/InstrumentStatus' } }
+        - { name: search, in: query, description: 'ISIN, FIGI, Ticker oder Name', schema: { type: string } }
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Liste der Instrumente
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/Instrument' } }
+                  total: { type: integer }
+  /instruments/{instrumentId}:
+    get:
+      tags: [Instrumente]
+      summary: Ein Instrument mit Feldlisten, Kategorien und Herkunft der Bestellung
+      parameters: [ { $ref: '#/components/parameters/InstrumentId' } ]
+      responses:
+        '200': { description: Instrument, content: { application/json: { schema: { $ref: '#/components/schemas/Instrument' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /orders:
+    post:
+      tags: [Bestellungen]
+      summary: Instrumente bestellen oder abbestellen (B-01, B-02)
+      description: |
+        Legt eine Bestellung an. Der Service prüft Duplikate (B3) und berechnet die Mehrkosten (B2).
+        Ab 200 CHF Mehrkosten pro Bestellung erhält sie den Status PENDING_APPROVAL und braucht eine
+        Freigabe durch eine zweite Person. Abbestellungen werden zum Monatsende wirksam, da Bloomberg
+        pro Monat abrechnet.
+      parameters: [ { $ref: '#/components/parameters/IdempotencyKey' } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OrderRequest' }
+      responses:
+        '201': { description: Bestellung angelegt, content: { application/json: { schema: { $ref: '#/components/schemas/Order' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    get:
+      tags: [Bestellungen]
+      summary: Bestellungen auflisten
+      parameters:
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/OrderStatus' } }
+        - { name: requestedBy, in: query, schema: { type: string } }
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Liste der Bestellungen
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/Order' } }
+                  total: { type: integer }
+  /orders/estimate:
+    post:
+      tags: [Bestellungen, Kosten]
+      summary: Kostenprognose ohne Bestellung (B2)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OrderRequest' }
+      responses:
+        '200': { description: Prognose, content: { application/json: { schema: { $ref: '#/components/schemas/CostEstimate' } } } }
+  /orders/{orderId}:
+    get:
+      tags: [Bestellungen]
+      summary: Eine Bestellung mit Status und Freigaben
+      parameters: [ { $ref: '#/components/parameters/OrderId' } ]
+      responses:
+        '200': { description: Bestellung, content: { application/json: { schema: { $ref: '#/components/schemas/Order' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /orders/{orderId}/approve:
+    post:
+      tags: [Bestellungen]
+      summary: Bestellung freigeben (4-Augen ab 200 CHF)
+      description: Die freigebende Person muss eine andere sein als die bestellende.
+      parameters: [ { $ref: '#/components/parameters/OrderId' } ]
+      requestBody:
+        content:
+          application/json:
+            schema: { type: object, properties: { comment: { type: string } } }
+      responses:
+        '200': { description: Freigegeben, content: { application/json: { schema: { $ref: '#/components/schemas/Order' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /orders/{orderId}/reject:
+    post:
+      tags: [Bestellungen]
+      summary: Bestellung ablehnen
+      parameters: [ { $ref: '#/components/parameters/OrderId' } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [comment], properties: { comment: { type: string } } }
+      responses:
+        '200': { description: Abgelehnt, content: { application/json: { schema: { $ref: '#/components/schemas/Order' } } } }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /usage:
+    get:
+      tags: [Kosten]
+      summary: Nutzung und Kosten pro Datenkategorie und Monat (B-03, B2)
+      parameters:
+        - { name: month, in: query, required: true, schema: { type: string, pattern: '^\d{4}-\d{2}$', example: '2026-10' } }
+      responses:
+        '200':
+          description: Nutzung je Kategorie
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/UsageEntry' } }
+  /pricing/categories:
+    get:
+      tags: [Kosten]
+      summary: Pflegbare Preistabelle der Datenkategorien
+      description: Werte werden nachgetragen, sobald der Bloomberg-Vertrag geprüft ist.
+      responses:
+        '200':
+          description: Kategorien mit Preisen
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/PricingCategory' } }
+    put:
+      tags: [Kosten]
+      summary: Preistabelle ersetzen (nur Lizenz-Administration)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: array, items: { $ref: '#/components/schemas/PricingCategory' } }
+      responses:
+        '200': { description: Gespeichert }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /timeseries:
+    get:
+      tags: [Zeitreihen]
+      summary: Zeitreihe eines Feldes abfragen, optional zu einem Stichtag (B-06, C1)
+      parameters:
+        - { name: instrumentId, in: query, required: true, schema: { type: string } }
+        - { name: field, in: query, required: true, schema: { type: string, example: PX_LAST } }
+        - { name: from, in: query, required: true, schema: { type: string, format: date } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date } }
+        - name: asOf
+          in: query
+          description: Wissensstand zu diesem Zeitpunkt (bitemporal). Ohne Angabe gilt der aktuelle Stand.
+          schema: { type: string, format: date-time }
+        - { name: format, in: query, schema: { type: string, enum: [json, csv], default: json } }
+      responses:
+        '200':
+          description: Zeitreihe
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/TimeSeries' } }
+            text/csv: { schema: { type: string } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /backfills:
+    post:
+      tags: [Zeitreihen]
+      summary: Historische Daten nachladen (C2)
+      description: Löst einen Bloomberg-History-Request aus; Kosten werden vorab geschätzt und unterliegen derselben Freigaberegel.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BackfillRequest' }
+      responses:
+        '202': { description: Angenommen, content: { application/json: { schema: { $ref: '#/components/schemas/Job' } } } }
+  /jobs/{jobId}:
+    get:
+      tags: [Zeitreihen, Universum]
+      summary: Status eines asynchronen Jobs (Backfill, Abgleich, Lieferung)
+      parameters:
+        - { name: jobId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Job, content: { application/json: { schema: { $ref: '#/components/schemas/Job' } } } }
+
+  /fields:
+    get:
+      tags: [Katalog]
+      summary: Feldkatalog mit Kategorie und Kosten durchsuchen (D3)
+      parameters:
+        - { name: search, in: query, schema: { type: string } }
+        - { name: category, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: Felder
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Field' } }
+
+  /universe/reconcile:
+    post:
+      tags: [Universum]
+      summary: Abgleich mit den Xentis-Positionen starten (B1)
+      description: |
+        Läuft automatisch einmal täglich nach der Xentis-Lieferung. Neue Positionen erzeugen
+        Bestellungen, geschlossene Positionen werden zur Abbestellung zum Monatsende vorgemerkt.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                dryRun: { type: boolean, default: true, description: Nur Vorschlag, keine Bestellungen }
+      responses:
+        '202': { description: Gestartet, content: { application/json: { schema: { $ref: '#/components/schemas/Job' } } } }
+
+  /data-quality/exceptions:
+    get:
+      tags: [Governance]
+      summary: Offene Datenqualitäts-Ausnahmen (D1)
+      parameters:
+        - { name: type, in: query, schema: { type: string, enum: [STALE_PRICE, OUTLIER, MISSING_VALUE] } }
+        - { name: status, in: query, schema: { type: string, enum: [OPEN, ACKNOWLEDGED, RESOLVED] } }
+      responses:
+        '200':
+          description: Ausnahmen
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/DataQualityException' } }
+  /audit:
+    get:
+      tags: [Governance]
+      summary: Prüfpfad abfragen (D2)
+      parameters:
+        - { name: instrumentId, in: query, schema: { type: string } }
+        - { name: user, in: query, schema: { type: string } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+      responses:
+        '200':
+          description: Einträge, neueste zuerst
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/AuditEntry' } }
+
+components:
+  securitySchemes:
+    oauth2:
+      type: oauth2
+      flows:
+        clientCredentials:
+          tokenUrl: https://login.example.internal/oauth2/token
+          scopes:
+            lizenz.read: Lesen
+            lizenz.order: Bestellen und abbestellen
+            lizenz.approve: Bestellungen freigeben
+            lizenz.admin: Preistabelle und Konfiguration pflegen
+
+  parameters:
+    InstrumentId: { name: instrumentId, in: path, required: true, schema: { type: string } }
+    OrderId: { name: orderId, in: path, required: true, schema: { type: string } }
+    Page: { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+    PageSize: { name: pageSize, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 50 } }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      description: Verhindert doppelte Bestellungen bei Wiederholungen
+      schema: { type: string }
+
+  responses:
+    BadRequest: { description: Ungültige Anfrage, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    Forbidden: { description: Keine Berechtigung, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    NotFound: { description: Nicht gefunden, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    Conflict: { description: Status lässt die Aktion nicht zu, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  schemas:
+    InstrumentStatus:
+      type: string
+      enum: [ACTIVE, PENDING_SUBSCRIBE, PENDING_UNSUBSCRIBE, INACTIVE]
+    Identifier:
+      type: object
+      required: [type, value]
+      properties:
+        type: { type: string, enum: [ISIN, FIGI, CUSIP, SEDOL, TICKER] }
+        value: { type: string, example: CH0012032048 }
+    Instrument:
+      type: object
+      properties:
+        id: { type: string }
+        identifiers: { type: array, items: { $ref: '#/components/schemas/Identifier' } }
+        name: { type: string }
+        status: { $ref: '#/components/schemas/InstrumentStatus' }
+        fieldSets: { type: array, items: { type: string } }
+        categories: { type: array, items: { type: string } }
+        source: { type: string, enum: [MANUAL, XENTIS], description: Herkunft der Bestellung }
+        subscribedSince: { type: string, format: date }
+        unsubscribeEffective: { type: string, format: date }
+    OrderRequest:
+      type: object
+      required: [type, instruments]
+      properties:
+        type: { type: string, enum: [SUBSCRIBE, UNSUBSCRIBE] }
+        instruments: { type: array, minItems: 1, items: { $ref: '#/components/schemas/Identifier' } }
+        fieldSets: { type: array, items: { type: string }, description: Nur bei SUBSCRIBE }
+        reason: { type: string }
+    OrderStatus:
+      type: string
+      enum: [DRAFT, PENDING_APPROVAL, APPROVED, REJECTED, SUBMITTED, COMPLETED, FAILED]
+    Order:
+      allOf:
+        - $ref: '#/components/schemas/OrderRequest'
+        - type: object
+          properties:
+            id: { type: string }
+            status: { $ref: '#/components/schemas/OrderStatus' }
+            estimate: { $ref: '#/components/schemas/CostEstimate' }
+            requiresApproval: { type: boolean, description: true ab 200 CHF Mehrkosten }
+            requestedBy: { type: string }
+            requestedAt: { type: string, format: date-time }
+            approvedBy: { type: string }
+            approvedAt: { type: string, format: date-time }
+            effectiveDate: { type: string, format: date }
+    CostEstimate:
+      type: object
+      properties:
+        currency: { type: string, example: CHF }
+        additionalMonthlyCost: { type: number, description: Mehrkosten im laufenden Monat }
+        alreadyBilledInstruments: { type: integer, description: Diesen Monat schon abgerechnet, keine Mehrkosten }
+        duplicates: { type: array, items: { $ref: '#/components/schemas/Identifier' }, description: Bereits im Universum (B3) }
+        byCategory:
+          type: array
+          items:
+            type: object
+            properties:
+              category: { type: string }
+              newUniqueInstruments: { type: integer }
+              cost: { type: number }
+    UsageEntry:
+      type: object
+      properties:
+        month: { type: string }
+        category: { type: string }
+        uniqueInstruments: { type: integer }
+        cost: { type: number }
+        currency: { type: string }
+    PricingCategory:
+      type: object
+      required: [category, pricePerInstrument, currency]
+      properties:
+        category: { type: string }
+        pricePerInstrument: { type: number }
+        currency: { type: string, example: CHF }
+        validFrom: { type: string, format: date }
+    TimeSeries:
+      type: object
+      properties:
+        instrumentId: { type: string }
+        field: { type: string }
+        asOf: { type: string, format: date-time }
+        points:
+          type: array
+          items:
+            type: object
+            properties:
+              date: { type: string, format: date }
+              value: { type: [number, string, 'null'] }
+              recordedAt: { type: string, format: date-time, description: Zeitpunkt, zu dem der Wert bekannt wurde }
+    BackfillRequest:
+      type: object
+      required: [instrumentIds, fields, from, to]
+      properties:
+        instrumentIds: { type: array, items: { type: string } }
+        fields: { type: array, items: { type: string } }
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+    Job:
+      type: object
+      properties:
+        id: { type: string }
+        kind: { type: string, enum: [BACKFILL, RECONCILE, DELIVERY] }
+        status: { type: string, enum: [QUEUED, RUNNING, SUCCEEDED, FAILED] }
+        startedAt: { type: string, format: date-time }
+        finishedAt: { type: string, format: date-time }
+        summary: { type: object, additionalProperties: true }
+    Field:
+      type: object
+      properties:
+        mnemonic: { type: string, example: PX_LAST }
+        description: { type: string }
+        category: { type: string }
+        pricePerInstrument: { type: number }
+    DataQualityException:
+      type: object
+      properties:
+        id: { type: string }
+        type: { type: string, enum: [STALE_PRICE, OUTLIER, MISSING_VALUE] }
+        instrumentId: { type: string }
+        field: { type: string }
+        date: { type: string, format: date }
+        status: { type: string, enum: [OPEN, ACKNOWLEDGED, RESOLVED] }
+    AuditEntry:
+      type: object
+      properties:
+        at: { type: string, format: date-time }
+        user: { type: string }
+        action: { type: string, example: ORDER_APPROVED }
+        entity: { type: string }
+        entityId: { type: string }
+        details: { type: object, additionalProperties: true }
+    Error:
+      type: object
+      properties:
+        code: { type: string }
+        message: { type: string }
