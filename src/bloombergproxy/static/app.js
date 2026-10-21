@@ -286,8 +286,19 @@ $("dq-rows").addEventListener("click", (e) => {
   });
 });
 
+// Meldungen (D4)
+const SENT_LABEL = { SENT: "versandt", STORED: "nur gespeichert", FAILED: "Versand fehlgeschlagen", PENDING: "ausstehend" };
+async function loadMessages() {
+  const rows = await api("/notifications");
+  $("m-rows").innerHTML = rows.map((n) => `<tr>
+    <td>${esc(new Date(n.createdAt + "Z").toLocaleString("de-CH"))}</td>
+    <td><strong>${esc(n.title)}</strong><br>${esc(n.text)}</td>
+    <td class="${n.status === "FAILED" ? "bad" : "hint"}">${esc(SENT_LABEL[n.status] || n.status)}${n.error ? `<br>${esc(n.error)}` : ""}</td>
+  </tr>`).join("") || `<tr><td colspan="3" class="hint">Keine Meldungen</td></tr>`;
+}
+
 const refresh = { universe: () => guard(loadUniverse), approvals: () => guard(loadApprovals), costs: () => guard(loadCosts),
-  quality: () => guard(loadQuality) };
+  quality: () => guard(loadQuality), messages: () => guard(loadMessages) };
 guard(async () => {
   if (await initAuth()) { refresh.universe(); await loadFieldSets(); }
 });

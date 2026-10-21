@@ -5,6 +5,7 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 
 from .api import router
 from .auth import EntraVerifier
@@ -36,6 +37,14 @@ def create_app(settings: Settings | None = None, bloomberg: BloombergClient | No
     app.state.reconciler = Reconciler(app.state.service)
     app.state.quality = DataQuality(app.state.service)
     app.include_router(router)
+
+    @app.middleware("http")
+    async def flush_notifications(request: Request, call_next):
+        # Meldungen erst nach dem Commit der Anfrage versenden.
+        response = await call_next(request)
+        if request.method != "GET":
+            await run_in_threadpool(app.state.service.notifier.flush)
+        return response
 
     for exc, code in ((NotFound, 404), (Conflict, 409), (Forbidden, 403), (Invalid, 400)):
         def handler(_: Request, e: Exception, code=code, name=exc.__name__):

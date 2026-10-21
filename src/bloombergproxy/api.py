@@ -228,6 +228,11 @@ def field_sets(svc: Svc, _: Reader):
     return svc.field_sets()
 
 
+@router.get("/notifications")
+def notifications(svc: Svc, _: Reader, limit: Annotated[int, Query(ge=1, le=500)] = 100):
+    return svc.notifier.recent(limit)
+
+
 @router.get("/audit", response_model=list[AuditEntry])
 def audit(svc: Svc, _: Reader,
           instrument_id: Annotated[str | None, Query(alias="instrumentId")] = None,

@@ -54,6 +54,11 @@ Lokal läuft der Service mit SQLite. Für Databricks `BBGPROXY_DATABASE_URL` auf
 - Phase 2: Datenqualität (D1) nach jedem Tageslauf – fehlende Werte, unveränderte Preise
   (`BBGPROXY_DQ_STALE_DAYS`, Standard 3), Ausreisser (`BBGPROXY_DQ_OUTLIER_SHARE`, Standard 20 %);
   Bearbeitung im Frontend (offen, in Bearbeitung, erledigt)
+- Phase 2: Benachrichtigungen (D4) – Freigabe ausstehend, Ablehnung, von Bloomberg abgelehnte
+  Instrumente, gestoppter Xentis-Abgleich, neue Datenqualitäts-Ausnahmen, fehlgeschlagener
+  Tageslauf. Gespeichert und nach dem Commit per Webhook versandt; für Teams einen Workflow
+  „Bei Empfang einer Webhookanforderung im Kanal posten“ anlegen und dessen URL als
+  `BBGPROXY_NOTIFY_WEBHOOK_URL` setzen (`BBGPROXY_PUBLIC_URL` für den Link in der Karte)
 
 ## Universum folgt den Xentis-Positionen (B1)
 
@@ -120,5 +125,6 @@ Die API prüft Signatur, Aussteller, Audience und Ablauf; Berechtigungen kommen 
 - **Databricks:** Der Service ist bisher nur mit SQLite getestet.
 - **Preise:** Die Vertragswerte fehlen noch; Pflege über `PUT /pricing/categories`.
 - **Xentis-Dateiformat** bestätigen (siehe oben).
-- **Phase 2, weiter:** Benachrichtigungen (D4), Nutzungsrechte (B4).
+- **Teams-Webhook** einrichten (`BBGPROXY_NOTIFY_WEBHOOK_URL`).
+- **Phase 2, weiter:** Nutzungsrechte (B4).
 - **Abrechnung der Historie** mit dem Vertrag abgleichen (`BBGPROXY_HISTORY_CATEGORY`).

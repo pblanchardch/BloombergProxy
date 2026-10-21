@@ -36,6 +36,11 @@ class Settings(BaseSettings):
     # Xentis-Instrumente abbestellen, bestellt er nichts ab und meldet das.
     xentis_max_unsubscribe_share: float = 0.2
 
+    # Benachrichtigungen (D4): Webhook, z. B. Teams-Workflow; leer = nur im Service sichtbar.
+    notify_webhook_url: str = ""
+    notify_webhook_format: str = "teams"  # "teams" (Adaptive Card) oder "plain" (JSON)
+    public_url: str = ""  # Link in den Meldungen, z. B. https://lizenz.firma.ch
+
     # "entra": Bearer-Token von Microsoft Entra ID (Standard, Betrieb).
     # "header": Benutzer und Scopes aus X-User / X-Scopes (nur Entwicklung, ohne Prüfung).
     auth_mode: str = "entra"

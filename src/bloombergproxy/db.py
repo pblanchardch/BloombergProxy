@@ -135,6 +135,20 @@ job = Table(
     schema="app",
 )
 
+notification = Table(
+    "notification", metadata,
+    Column("notification_id", String, primary_key=True),
+    Column("created_at", DateTime, nullable=False),
+    Column("event", String, nullable=False),
+    Column("title", String, nullable=False),
+    Column("text", String, nullable=False),
+    Column("details", String),
+    Column("status", String, nullable=False),
+    Column("error", String),
+    Column("sent_at", DateTime),
+    schema="app",
+)
+
 bbg_response_raw = Table(
     "bbg_response_raw", metadata,
     Column("request_id", String, nullable=False),

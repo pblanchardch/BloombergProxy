@@ -359,6 +359,33 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /notifications:
+    get:
+      tags: [Governance]
+      summary: Letzte Benachrichtigungen (D4)
+      description: |
+        Ereignisse: ORDER_PENDING_APPROVAL, ORDER_REJECTED, DELIVERY_ERRORS, RECONCILE_BLOCKED,
+        DQ_EXCEPTIONS, DAILY_RUN_FAILED. Versand per Webhook (Teams-Karte oder JSON) nach dem Commit.
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 100 } }
+      responses:
+        '200':
+          description: Meldungen, neueste zuerst
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: { type: string }
+                    createdAt: { type: string, format: date-time }
+                    event: { type: string }
+                    title: { type: string }
+                    text: { type: string }
+                    status: { type: string, enum: [PENDING, SENT, STORED, FAILED] }
+                    error: { type: string }
+
   /audit:
     get:
       tags: [Governance]

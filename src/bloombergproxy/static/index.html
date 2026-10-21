@@ -24,6 +24,7 @@
   <button data-tab="approvals">Freigaben</button>
   <button data-tab="costs">Kosten</button>
   <button data-tab="quality">Datenqualität</button>
+  <button data-tab="messages">Meldungen</button>
 </nav>
 
 <main>
@@ -111,6 +112,13 @@
     <table>
       <thead><tr><th>Datum</th><th>Art</th><th>Instrument</th><th>Feld</th><th>Detail</th><th>Status</th><th></th></tr></thead>
       <tbody id="dq-rows"></tbody>
+    </table>
+  </section>
+  <section id="messages" hidden>
+    <p class="hint">Meldungen gehen zusätzlich an den konfigurierten Teams-Kanal.</p>
+    <table>
+      <thead><tr><th>Zeit</th><th>Meldung</th><th>Versand</th></tr></thead>
+      <tbody id="m-rows"></tbody>
     </table>
   </section>
 </main>

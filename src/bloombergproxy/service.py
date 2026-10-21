@@ -25,6 +25,7 @@ from sqlalchemy import Connection, Engine, and_, case, delete, func, insert, or_
 from . import db
 from .bloomberg import BloombergClient, Delivery, UniverseChange, bbg_identifier, parse_identifier
 from .config import Settings
+from .notify import Notifier
 from .models import (
     AuditEntry,
     CategoryCost,
@@ -82,11 +83,13 @@ class LicenseService:
         bloomberg: BloombergClient,
         settings: Settings,
         clock: Callable[[], datetime] = utcnow,
+        notifier: Notifier | None = None,
     ):
         self.engine = engine
         self.bloomberg = bloomberg
         self.settings = settings
         self.clock = clock
+        self.notifier = notifier or Notifier(engine, settings, clock)
 
     # ------------------------------------------------------------------ Hilfen
 
@@ -284,7 +287,15 @@ class LicenseService:
             self._audit(conn, user, "ORDER_CREATED", "order", order_id,
                         {"type": req.type, "cost": estimate.additional_monthly_cost,
                          "requiresApproval": requires_approval})
-            if not requires_approval:
+            if requires_approval:
+                kind = {OrderType.BACKFILL: "Backfill"}.get(req.type, "Bestellung")
+                cost = (f"{estimate.additional_monthly_cost} {estimate.currency}"
+                        + (f", ohne Preis: {', '.join(estimate.unpriced_categories)}"
+                           if estimate.unpriced_categories else ""))
+                self.notifier.add(conn, "ORDER_PENDING_APPROVAL", f"{kind} wartet auf Freigabe",
+                                  f"{user} hat {len(items)} Instrument(e) angefragt. Mehrkosten: {cost}.",
+                                  {"orderId": order_id})
+            else:
                 self._execute(conn, order_id, user)
             return self._load_order(conn, order_id)
 
@@ -313,6 +324,10 @@ class LicenseService:
                         {"comment": comment})
             if approve:
                 self._execute(conn, order_id, user)
+            else:
+                self.notifier.add(conn, "ORDER_REJECTED", "Bestellung abgelehnt",
+                                  f"{user} hat die Bestellung von {row['requested_by']} abgelehnt: {comment}",
+                                  {"orderId": order_id, "requestedBy": row["requested_by"]})
             return self._load_order(conn, order_id)
 
     def _execute(self, conn: Connection, order_id: str, user: str) -> None:
@@ -500,6 +515,13 @@ class LicenseService:
                 self._audit(conn, user, "DELIVERY_PROCESSED", "order", order_id,
                             {"bbgRequestId": request_id, **stats, "errors": delivery.errors})
                 results.append({"orderId": order_id, "status": status, **stats, "errors": delivery.errors})
+                if delivery.errors:
+                    self.notifier.add(
+                        conn, "DELIVERY_ERRORS",
+                        "Bestellung fehlgeschlagen" if status == OrderStatus.FAILED else "Instrumente abgelehnt",
+                        f"Bloomberg hat {len(delivery.errors)} Instrument(e) abgelehnt: "
+                        + ", ".join(f"{i} ({c})" for i, c in delivery.errors.items()),
+                        {"orderId": order_id})
             return results
 
     def run_daily_delivery(self, user: str = "system") -> dict:

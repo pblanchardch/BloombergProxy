@@ -157,6 +157,20 @@ CREATE TABLE IF NOT EXISTS app.reconcile_proposal (
   CONSTRAINT ck_rp_action CHECK (action IN ('SUBSCRIBE','UNSUBSCRIBE','KEEP'))
 ) COMMENT 'Ergebnis des täglichen Abgleichs mit Xentis (B1)';
 
+CREATE TABLE IF NOT EXISTS app.notification (
+  notification_id STRING    NOT NULL,
+  created_at      TIMESTAMP NOT NULL,
+  event           STRING    NOT NULL COMMENT 'z. B. ORDER_PENDING_APPROVAL, DQ_EXCEPTIONS',
+  title           STRING    NOT NULL,
+  text            STRING    NOT NULL,
+  details         STRING    COMMENT 'JSON',
+  status          STRING    NOT NULL,
+  error           STRING,
+  sent_at         TIMESTAMP,
+  CONSTRAINT pk_notification PRIMARY KEY (notification_id),
+  CONSTRAINT ck_notification_status CHECK (status IN ('PENDING','SENT','STORED','FAILED'))
+) COMMENT 'Benachrichtigungen (D4): gespeichert und nach dem Commit versandt';
+
 CREATE TABLE IF NOT EXISTS app.audit_log (
   at        TIMESTAMP NOT NULL,
   user_name STRING    NOT NULL,

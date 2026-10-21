@@ -152,6 +152,9 @@ class Reconciler:
                      "order_id": orders[x["action"]].id if x["action"] in orders else None}
                     for x in proposals])
             self.svc._audit(conn, user, "UNIVERSE_RECONCILED", "job", job_id, summary)
+            if blocked and not dry_run:
+                self.svc.notifier.add(conn, "RECONCILE_BLOCKED", "Xentis-Abgleich: Abbestellungen gestoppt",
+                                      notes[0], {"jobId": job_id})
         return summary | {"proposals": [
             {"isin": x["isin"], "action": x["action"], "reason": x["reason"]} for x in proposals]}
 
