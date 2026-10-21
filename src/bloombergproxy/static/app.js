@@ -333,6 +333,17 @@ async function loadActions() {
 }
 $("ca-form").addEventListener("submit", (e) => { e.preventDefault(); guard(loadActions); });
 
+// ESG (A3)
+async function loadEsg() {
+  const rows = await api("/esg");
+  $("esg-rows").innerHTML = rows.map((r) => `<tr>
+    <td>${esc(r.name || r.instrumentId)}</td>
+    <td>${r.scores.map((s) => `${esc(s.source)}: ${esc(s.raw)} → ${s.normalized ?? "<span class='hint'>keine Skala</span>"}`).join("<br>")}</td>
+    <td class="num">${r.average ?? "–"}</td>
+    <td class="num ${r.divergent ? "warn" : ""}">${r.spread ?? "–"}${r.divergent ? " ⚠" : ""}</td>
+  </tr>`).join("") || `<tr><td colspan="4" class="hint">Keine ESG-Daten</td></tr>`;
+}
+
 // Meldungen (D4)
 const SENT_LABEL = { SENT: "versandt", STORED: "nur gespeichert", FAILED: "Versand fehlgeschlagen", PENDING: "ausstehend" };
 async function loadMessages() {
@@ -345,7 +356,7 @@ async function loadMessages() {
 }
 
 const refresh = { universe: () => guard(loadUniverse), approvals: () => guard(loadApprovals), costs: () => guard(loadCosts),
-  quality: () => guard(loadQuality), messages: () => guard(loadMessages), actions: () => guard(loadActions) };
+  quality: () => guard(loadQuality), messages: () => guard(loadMessages), actions: () => guard(loadActions), esg: () => guard(loadEsg) };
 guard(async () => {
   if (await initAuth()) { refresh.universe(); await loadFieldSets(); }
 });

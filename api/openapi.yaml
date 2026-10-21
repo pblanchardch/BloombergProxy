@@ -257,6 +257,43 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
+  /esg:
+    get:
+      tags: [Zeitreihen]
+      summary: ESG-Scores aller Quellen, vergleichbar gemacht (A3)
+      description: |
+        Je Quelle der letzte ESG_SCORE, umgerechnet auf 0–100 (höher = besser) gemäss der
+        konfigurierten Skala (Zahlenbereich oder Buchstabenfolge). divergent = die Quellen liegen
+        weiter als die Schwelle (Standard 25 Punkte) auseinander. Nutzungsrechte der Kategorie ESG
+        gelten (B4).
+      parameters:
+        - { name: instrumentId, in: query, schema: { type: string }, description: Ohne Angabe das ganze Universum }
+      responses:
+        '200':
+          description: Übersicht je Instrument
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    instrumentId: { type: string }
+                    name: { type: [string, 'null'] }
+                    scores:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          source: { type: string }
+                          raw: { type: string }
+                          date: { type: string, format: date }
+                          normalized: { type: [number, 'null'] }
+                    average: { type: [number, 'null'] }
+                    spread: { type: [number, 'null'] }
+                    divergent: { type: boolean }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
   /corporate-actions:
     get:
       tags: [Zeitreihen]

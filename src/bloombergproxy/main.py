@@ -14,6 +14,7 @@ from .config import Settings
 from .corporate_actions import CorporateActions
 from .db import make_engine
 from .entitlements import Entitlements
+from .esg import Esg
 from .quality import DataQuality
 from .reconcile import Reconciler
 from .vendors import VendorImport
@@ -42,6 +43,7 @@ def create_app(settings: Settings | None = None, bloomberg: BloombergClient | No
     app.state.entitlements = Entitlements(app.state.service)
     app.state.vendors = VendorImport(app.state.service)
     app.state.corporate_actions = CorporateActions(app.state.service)
+    app.state.esg = Esg(app.state.service)
     app.include_router(router)
 
     @app.middleware("http")

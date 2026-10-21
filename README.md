@@ -111,6 +111,16 @@ in Schweizer Schreibweise (`1'250.50`). Trennzeichen und Spaltennamen sind über
 - Ein Split am Ex-Tag erklärt den Preissprung: dann keine `OUTLIER`-Ausnahme.
 - Neue oder geänderte Splits und annullierte Ereignisse werden gemeldet.
 
+## ESG mehrerer Anbieter (A3)
+
+- `ESG_SCORE` von Bloomberg (Feldliste `ESG`) und anderen Anbietern (Werte-Import, z. B.
+  `ISIN;CH…;21.10.2026;ESG_SCORE;AA`).
+- `GET /api/v1/esg` rechnet jeden Score auf 0–100 um (höher = besser) und zeigt Durchschnitt und
+  Abweichung; über `BBGPROXY_ESG_DIVERGENCE` (Standard 25 Punkte) gilt ein Instrument als
+  abweichend. Skalen je Quelle in `BBGPROXY_ESG_SCALES` – **Annahmen**: Bloomberg 0–10,
+  MSCI CCC…AAA, Sustainalytics Risiko 0–50 (niedriger = besser); mit den Verträgen abgleichen.
+- Die Nutzungsrechte der Kategorie `ESG` gelten auch hier.
+
 ## Bloomberg-Mock
 
 Bis Zugangsdaten und Katalog-ID der Data License vorliegen, spricht der Service mit

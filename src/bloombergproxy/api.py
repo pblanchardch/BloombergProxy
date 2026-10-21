@@ -28,6 +28,7 @@ from .models import (
     UsageEntry,
 )
 from .corporate_actions import CorporateActions, GoldenAction
+from .esg import Esg, EsgSummary
 from .entitlements import Entitlement, Entitlements, UsageByCategory
 from .jobs import daily_run
 from .quality import DataQuality, DqException, StatusChange
@@ -110,6 +111,13 @@ def corporate_actions_dep(request: Request) -> CorporateActions:
 
 
 Ca = Annotated[CorporateActions, Depends(corporate_actions_dep)]
+
+
+def esg_dep(request: Request) -> Esg:
+    return request.app.state.esg
+
+
+EsgDep = Annotated[Esg, Depends(esg_dep)]
 Dq = Annotated[DataQuality, Depends(quality)]
 Reader = Annotated[User, Depends(require("lizenz.read"))]
 Orderer = Annotated[User, Depends(require("lizenz.order"))]
@@ -254,6 +262,14 @@ def entitlement_usage(ent: Ent, _: Admin, month: Annotated[str, Query(pattern=r"
 def run_delivery(rec: Rec, dq: Dq, ca: Ca, user: Admin):
     """Tageslauf auslösen (im Betrieb zeitgesteuert): Xentis-Abgleich, Lieferungen, Datenqualität."""
     return daily_run(rec, dq, user.name, ca)
+
+
+@router.get("/esg", response_model=list[EsgSummary])
+def esg(es: EsgDep, ent: Ent, user: Reader,
+        instrument_id: Annotated[str | None, Query(alias="instrumentId")] = None):
+    """ESG-Scores aller Quellen, auf 0–100 umgerechnet, mit Durchschnitt und Abweichung (A3)."""
+    ent.check_read(user, instrument_id or "*", "ESG_SCORE", export=False)
+    return es.summary([instrument_id] if instrument_id else None)
 
 
 @router.get("/corporate-actions", response_model=list[GoldenAction])

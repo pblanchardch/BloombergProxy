@@ -16,6 +16,15 @@ class Settings(BaseSettings):
     # Golden Copy (A4): Rangfolge der Quellen; nicht genannte Anbieter folgen alphabetisch.
     source_precedence: list[str] = ["BLOOMBERG"]
 
+    # ESG (A3): Skala je Quelle für die Umrechnung auf 0–100 (höher = besser). Annahmen – mit den
+    # Anbieterverträgen abgleichen. Quellen ohne Eintrag werden angezeigt, aber nicht umgerechnet.
+    esg_scales: dict[str, dict] = {
+        "BLOOMBERG": {"min": 0, "max": 10, "higher_is_better": True},
+        "MSCI": {"letters": ["CCC", "B", "BB", "BBB", "A", "AA", "AAA"]},
+        "SUSTAINALYTICS": {"min": 0, "max": 50, "higher_is_better": False},
+    }
+    esg_divergence: float = 25.0  # Punkte auf der 0–100-Skala
+
     # Backfill (C2): Abrechnungskategorie für Historien-Anfragen und maximaler Zeitraum.
     # Annahme: Bloomberg rechnet Historie je Instrument und Monat ab; mit dem Vertrag abgleichen.
     history_category: str = "History"

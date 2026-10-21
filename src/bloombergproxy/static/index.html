@@ -24,6 +24,7 @@
   <button data-tab="approvals">Freigaben</button>
   <button data-tab="costs">Kosten</button>
   <button data-tab="actions">Corporate Actions</button>
+  <button data-tab="esg">ESG</button>
   <button data-tab="quality">Datenqualität</button>
   <button data-tab="messages">Meldungen</button>
 </nav>
@@ -126,6 +127,13 @@
     <table>
       <thead><tr><th>Ex-Datum</th><th>Instrument</th><th>Art</th><th>Status</th><th>Betrag / Verhältnis</th><th>Zahltag</th><th>Quellen</th></tr></thead>
       <tbody id="ca-rows"></tbody>
+    </table>
+  </section>
+  <section id="esg" hidden>
+    <p class="hint">Scores aller Quellen, umgerechnet auf 0–100 (höher = besser). Grosse Abweichungen zwischen Anbietern sind markiert.</p>
+    <table>
+      <thead><tr><th>Instrument</th><th>Quellen (Originalwert → 0–100)</th><th>Durchschnitt</th><th>Abweichung</th></tr></thead>
+      <tbody id="esg-rows"></tbody>
     </table>
   </section>
   <section id="quality" hidden>
