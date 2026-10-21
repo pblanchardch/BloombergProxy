@@ -49,6 +49,8 @@ Lokal läuft der Service mit SQLite. Für Databricks `BBGPROXY_DATABASE_URL` auf
 - Feldkatalog, Feldlisten, Prüfpfad (D2, D3)
 - Anmeldung über Microsoft Entra ID
 - Phase 2: Universum folgt den Xentis-Positionen (B1)
+- Phase 2: Historie nachladen (C2) als Bestellung vom Typ `BACKFILL` – mit Kostenprognose
+  (Kategorie `History`, Annahme: je Instrument und Monat) und Freigabe ab 200 CHF
 
 ## Universum folgt den Xentis-Positionen (B1)
 
@@ -115,4 +117,5 @@ Die API prüft Signatur, Aussteller, Audience und Ablauf; Berechtigungen kommen 
 - **Databricks:** Der Service ist bisher nur mit SQLite getestet.
 - **Preise:** Die Vertragswerte fehlen noch; Pflege über `PUT /pricing/categories`.
 - **Xentis-Dateiformat** bestätigen (siehe oben).
-- **Phase 2, weiter:** Backfills (C2), Datenqualität (D1), Benachrichtigungen (D4), Nutzungsrechte (B4).
+- **Phase 2, weiter:** Datenqualität (D1), Benachrichtigungen (D4), Nutzungsrechte (B4).
+- **Abrechnung der Historie** mit dem Vertrag abgleichen (`BBGPROXY_HISTORY_CATEGORY`).

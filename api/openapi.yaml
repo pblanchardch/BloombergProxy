@@ -53,7 +53,7 @@ paths:
   /orders:
     post:
       tags: [Bestellungen]
-      summary: Instrumente bestellen oder abbestellen (B-01, B-02)
+      summary: Instrumente bestellen, abbestellen oder Historie nachladen (B-01, B-02, C2)
       description: |
         Legt eine Bestellung an. Der Service prüft Duplikate (B3) und berechnet die Mehrkosten (B2).
         Ab 200 CHF Mehrkosten pro Bestellung erhält sie den Status PENDING_APPROVAL und braucht eine
@@ -190,18 +190,6 @@ paths:
             application/json: { schema: { $ref: '#/components/schemas/TimeSeries' } }
             text/csv: { schema: { type: string } }
         '403': { $ref: '#/components/responses/Forbidden' }
-  /backfills:
-    post:
-      tags: [Zeitreihen]
-      summary: Historische Daten nachladen (C2)
-      description: Löst einen Bloomberg-History-Request aus; Kosten werden vorab geschätzt und unterliegen derselben Freigaberegel.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/BackfillRequest' }
-      responses:
-        '202': { description: Angenommen, content: { application/json: { schema: { $ref: '#/components/schemas/Job' } } } }
   /jobs/{jobId}:
     get:
       tags: [Zeitreihen, Universum]
@@ -425,11 +413,17 @@ components:
     OrderRequest:
       type: object
       required: [type, instruments]
+      description: |
+        SUBSCRIBE bestellt mit Feldlisten, UNSUBSCRIBE bestellt zum Monatsende ab, BACKFILL lädt
+        Historie (C2) für Instrumente im Universum; abgerechnet über die Kategorie History.
       properties:
-        type: { type: string, enum: [SUBSCRIBE, UNSUBSCRIBE] }
+        type: { type: string, enum: [SUBSCRIBE, UNSUBSCRIBE, BACKFILL] }
         instruments: { type: array, minItems: 1, items: { $ref: '#/components/schemas/Identifier' } }
         fieldSets: { type: array, items: { type: string }, description: Nur bei SUBSCRIBE }
         reason: { type: string }
+        fields: { type: array, items: { type: string }, description: Nur bei BACKFILL }
+        from: { type: string, format: date, description: Nur bei BACKFILL }
+        to: { type: string, format: date, description: Nur bei BACKFILL, höchstens heute }
     OrderStatus:
       type: string
       enum: [DRAFT, PENDING_APPROVAL, APPROVED, REJECTED, SUBMITTED, COMPLETED, FAILED]
@@ -498,19 +492,11 @@ components:
               date: { type: string, format: date }
               value: { type: [number, string, 'null'] }
               recordedAt: { type: string, format: date-time, description: Zeitpunkt, zu dem der Wert bekannt wurde }
-    BackfillRequest:
-      type: object
-      required: [instrumentIds, fields, from, to]
-      properties:
-        instrumentIds: { type: array, items: { type: string } }
-        fields: { type: array, items: { type: string } }
-        from: { type: string, format: date }
-        to: { type: string, format: date }
     Job:
       type: object
       properties:
         id: { type: string }
-        kind: { type: string, enum: [BACKFILL, RECONCILE, DELIVERY] }
+        kind: { type: string, enum: [RECONCILE, DELIVERY] }
         status: { type: string, enum: [QUEUED, RUNNING, SUCCEEDED, FAILED] }
         startedAt: { type: string, format: date-time }
         finishedAt: { type: string, format: date-time }

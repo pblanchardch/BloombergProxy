@@ -13,6 +13,11 @@ class Settings(BaseSettings):
     approval_threshold: Decimal = Decimal("200")
     currency: str = "CHF"
 
+    # Backfill (C2): Abrechnungskategorie für Historien-Anfragen und maximaler Zeitraum.
+    # Annahme: Bloomberg rechnet Historie je Instrument und Monat ab; mit dem Vertrag abgleichen.
+    history_category: str = "History"
+    backfill_max_days: int = 3650
+
     # Xentis-Positionsdatei (CSV). Spaltennamen an den tatsächlichen Export anpassen.
     xentis_delimiter: str = ";"
     xentis_col_date: str = "Stichtag"

@@ -102,6 +102,9 @@ CREATE TABLE IF NOT EXISTS app.`order` (
   field_sets         STRING        COMMENT 'Kommagetrennte Feldlisten (nur SUBSCRIBE)',
   estimated_cost_chf DECIMAL(12,2) COMMENT 'Mehrkosten im laufenden Monat',
   estimate_json      STRING        COMMENT 'Kostenprognose zum Zeitpunkt der Bestellung (JSON)',
+  history_fields     STRING        COMMENT 'Nur BACKFILL: kommagetrennte Felder',
+  history_from       DATE,
+  history_to         DATE,
   requires_approval  BOOLEAN       NOT NULL COMMENT 'true ab 200 CHF',
   source             STRING        NOT NULL COMMENT 'MANUAL oder XENTIS (automatischer Abgleich)',
   requested_by       STRING        NOT NULL,
@@ -113,7 +116,7 @@ CREATE TABLE IF NOT EXISTS app.`order` (
   bbg_request_id     STRING,
   idempotency_key    STRING,
   CONSTRAINT pk_order PRIMARY KEY (order_id),
-  CONSTRAINT ck_order_type   CHECK (order_type IN ('SUBSCRIBE','UNSUBSCRIBE')),
+  CONSTRAINT ck_order_type   CHECK (order_type IN ('SUBSCRIBE','UNSUBSCRIBE','BACKFILL')),
   CONSTRAINT ck_order_status CHECK (status IN ('DRAFT','PENDING_APPROVAL','APPROVED','REJECTED','SUBMITTED','COMPLETED','FAILED')),
   CONSTRAINT ck_order_source CHECK (source IN ('MANUAL','XENTIS')),
   CONSTRAINT ck_order_4eyes  CHECK (decided_by IS NULL OR decided_by <> requested_by)

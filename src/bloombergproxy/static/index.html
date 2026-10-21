@@ -66,13 +66,18 @@
   <section id="order" hidden>
     <form id="order-form">
       <label>Art
-        <select id="o-type"><option value="SUBSCRIBE">Bestellen</option><option value="UNSUBSCRIBE">Abbestellen</option></select>
+        <select id="o-type"><option value="SUBSCRIBE">Bestellen</option><option value="UNSUBSCRIBE">Abbestellen</option><option value="BACKFILL">Historie nachladen</option></select>
       </label>
       <label>Identifier-Typ
         <select id="o-idtype"><option>ISIN</option><option>FIGI</option><option>TICKER</option><option>CUSIP</option><option>SEDOL</option></select>
       </label>
       <label>Instrumente (eins pro Zeile)<textarea id="o-ids" rows="5" required></textarea></label>
       <fieldset id="o-fieldsets"><legend>Feldlisten</legend></fieldset>
+      <div id="o-history" class="row" hidden>
+        <label>Felder (kommagetrennt) <input id="o-fields" value="PX_LAST"></label>
+        <label>Von <input id="o-from" type="date"></label>
+        <label>Bis <input id="o-to" type="date"></label>
+      </div>
       <label>Begründung <input id="o-reason"></label>
       <div class="row">
         <button type="button" id="o-estimate">Kosten prüfen</button>

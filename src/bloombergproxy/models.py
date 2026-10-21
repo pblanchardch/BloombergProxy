@@ -30,6 +30,7 @@ class InstrumentStatus(StrEnum):
 class OrderType(StrEnum):
     SUBSCRIBE = "SUBSCRIBE"
     UNSUBSCRIBE = "UNSUBSCRIBE"
+    BACKFILL = "BACKFILL"
 
 
 class OrderStatus(StrEnum):
@@ -69,6 +70,10 @@ class OrderRequest(ApiModel):
     instruments: list[Identifier] = Field(min_length=1)
     field_sets: list[str] = []
     reason: str | None = None
+    # Nur BACKFILL (C2): Felder und Zeitraum der Historie
+    fields: list[str] = []
+    from_date: date | None = Field(default=None, alias="from")
+    to_date: date | None = Field(default=None, alias="to")
 
 
 class CategoryCost(ApiModel):

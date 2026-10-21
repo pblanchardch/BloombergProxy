@@ -51,6 +51,10 @@ class BloombergClient(Protocol):
         """Fordert die Tageslieferung (C3) für das Universum an."""
         ...
 
+    def request_history(self, identifiers: list[str], fields: list[str], start: date, end: date) -> str:
+        """Fordert historische Werte (Backfill, C2) für Werktage von ``start`` bis ``end`` an."""
+        ...
+
     def fetch(self, request_id: str) -> Delivery | None:
         """Holt die Antwort ab; ``None``, solange sie noch nicht bereit ist."""
         ...
@@ -89,35 +93,43 @@ class MockBloombergClient:
     clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc).replace(tzinfo=None)
     correction_rate: float = 0.1
     requests: list[tuple[str, UniverseChange]] = field(default_factory=list)
-    _pending: dict[str, tuple[dict[str, list[str]], date, bool]] = field(default_factory=dict)
+    # Request-ID -> (Felder je Identifier, Stichtage, Tageslieferung mit Korrekturen?)
+    _pending: dict[str, tuple[dict[str, list[str]], list[date], bool]] = field(default_factory=dict)
+
+    def _new(self, fields_by_identifier: dict[str, list[str]], dates: list[date], snapshot: bool) -> str:
+        request_id = f"mock-{uuid.uuid4().hex[:12]}"
+        self._pending[request_id] = (fields_by_identifier, dates, snapshot)
+        return request_id
 
     def submit(self, change: UniverseChange) -> str:
-        request_id = f"mock-{uuid.uuid4().hex[:12]}"
+        request_id = self._new({i: change.fields for i in change.add}, [self.clock().date()], False)
         self.requests.append((request_id, change))
-        self._pending[request_id] = ({i: change.fields for i in change.add}, self.clock().date(), False)
         return request_id
 
     def request_snapshot(self, fields_by_identifier: dict[str, list[str]], as_of: date) -> str:
-        request_id = f"mock-{uuid.uuid4().hex[:12]}"
-        self._pending[request_id] = (fields_by_identifier, as_of, True)
-        return request_id
+        return self._new(fields_by_identifier, [as_of], True)
+
+    def request_history(self, identifiers: list[str], fields: list[str], start: date, end: date) -> str:
+        days = [start + timedelta(days=n) for n in range((end - start).days + 1)]
+        return self._new({i: fields for i in identifiers}, [d for d in days if d.weekday() < 5], False)
 
     def fetch(self, request_id: str) -> Delivery | None:
         if request_id not in self._pending:
             return None
-        fields_by_identifier, as_of, snapshot = self._pending.pop(request_id)
+        fields_by_identifier, dates, snapshot = self._pending.pop(request_id)
         records, errors = [], {}
-        previous = as_of - timedelta(days=1)
         for identifier, fields in fields_by_identifier.items():
             id_type, value = parse_identifier(identifier)
             if id_type == "ISIN" and not valid_isin(value):
                 errors[identifier] = "INVALID_SECURITY"
                 continue
             for f in fields:
-                records.append(Record(identifier, f, as_of, self.value(identifier, f, as_of)))
-                if snapshot and f == "PX_LAST" and _unit("correction", identifier, as_of) < self.correction_rate:
-                    corrected = self.value(identifier, f, previous, corrected=True)
-                    records.append(Record(identifier, f, previous, corrected))
+                records += [Record(identifier, f, d, self.value(identifier, f, d)) for d in dates]
+            as_of = dates[-1]
+            if snapshot and "PX_LAST" in fields and _unit("correction", identifier, as_of) < self.correction_rate:
+                previous = as_of - timedelta(days=1)
+                records.append(Record(identifier, "PX_LAST", previous,
+                                      self.value(identifier, "PX_LAST", previous, corrected=True)))
         return Delivery(request_id, records, errors)
 
     @staticmethod

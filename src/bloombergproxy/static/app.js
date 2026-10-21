@@ -197,8 +197,17 @@ function orderBody() {
     fieldSets: $("o-type").value === "SUBSCRIBE"
       ? [...document.querySelectorAll("#o-fieldsets input:checked")].map((c) => c.value) : [],
     reason: $("o-reason").value || null,
+    ...($("o-type").value === "BACKFILL" ? {
+      fields: $("o-fields").value.split(",").map((f) => f.trim()).filter(Boolean),
+      from: $("o-from").value || null,
+      to: $("o-to").value || null,
+    } : {}),
   };
 }
+$("o-type").addEventListener("change", () => {
+  $("o-fieldsets").hidden = $("o-type").value !== "SUBSCRIBE";
+  $("o-history").hidden = $("o-type").value !== "BACKFILL";
+});
 
 function renderEstimate(est, order) {
   const rows = est.byCategory.map((c) => `<tr><td>${esc(c.category)}</td><td class="num">${c.newUniqueInstruments}</td><td class="num">${money(c.cost, est.currency)}</td></tr>`).join("");
