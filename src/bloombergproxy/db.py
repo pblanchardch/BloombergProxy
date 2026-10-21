@@ -120,6 +120,27 @@ audit_log = Table(
     schema="app",
 )
 
+job = Table(
+    "job", metadata,
+    Column("job_id", String, primary_key=True),
+    Column("kind", String, nullable=False),
+    Column("status", String, nullable=False),
+    Column("started_at", DateTime),
+    Column("finished_at", DateTime),
+    Column("summary", String),
+    schema="app",
+)
+
+bbg_response_raw = Table(
+    "bbg_response_raw", metadata,
+    Column("request_id", String, nullable=False),
+    Column("file_name", String, nullable=False),
+    Column("received_at", DateTime, nullable=False),
+    Column("line_no", Integer, nullable=False),
+    Column("payload", String, nullable=False),
+    schema="bronze",
+)
+
 billing_instrument_month = Table(
     "billing_instrument_month", metadata,
     Column("billing_month", String, primary_key=True),
@@ -142,7 +163,7 @@ timeseries_value = Table(
     schema="silver",
 )
 
-SCHEMAS = ("app", "gold", "silver")
+SCHEMAS = ("app", "bronze", "gold", "silver")
 
 
 def make_engine(url: str) -> Engine:

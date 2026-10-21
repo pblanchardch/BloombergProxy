@@ -9,20 +9,69 @@ function save(key, value) {
   try { localStorage.setItem(key, value); } catch { /* ohne Speicher weiter */ }
 }
 
-$("user").value = load("bbg.user", "");
-$("scopes").value = load("bbg.scopes", "lizenz.read,lizenz.order");
+// Anmeldung: Entra ID (MSAL) im Betrieb, Benutzer/Scopes-Felder im Entwicklungsmodus.
+const MSAL_URL = "https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.28.1/lib/msal-browser.min.js";
+const MSAL_SRI = "sha384-B5PXeUfgiegchZiX5iMRssMrHd9NfPhFnITob1HyW1CY76udptWpBsniaDsH/+BY";
+let authConfig = { mode: "header" };
+let msalApp = null;
+
+function loadScript(src, integrity) {
+  return new Promise((resolve, reject) => {
+    const s = Object.assign(document.createElement("script"), { src, integrity, crossOrigin: "anonymous" });
+    s.onload = resolve;
+    s.onerror = () => reject(new Error("Anmeldebibliothek konnte nicht geladen werden"));
+    document.head.append(s);
+  });
+}
+
+async function initAuth() {
+  authConfig = await (await fetch("/api/v1/auth/config")).json();
+  if (authConfig.mode !== "entra") {
+    $("user").value = load("bbg.user", "");
+    $("scopes").value = load("bbg.scopes", "lizenz.read,lizenz.order");
+    return Boolean($("user").value);
+  }
+  $("who").hidden = true;
+  await loadScript(MSAL_URL, MSAL_SRI);
+  msalApp = new msal.PublicClientApplication({
+    auth: {
+      clientId: authConfig.clientId,
+      authority: `https://login.microsoftonline.com/${authConfig.tenantId}`,
+      redirectUri: location.origin,
+    },
+    cache: { cacheLocation: "sessionStorage" },
+  });
+  await msalApp.initialize();
+  const result = await msalApp.handleRedirectPromise();
+  const account = result?.account || msalApp.getAllAccounts()[0];
+  if (!account) {
+    await msalApp.loginRedirect({ scopes: authConfig.scopes });
+    return false;
+  }
+  msalApp.setActiveAccount(account);
+  $("me").textContent = account.username;
+  $("me").hidden = false;
+  return true;
+}
+
+async function authHeaders() {
+  if (authConfig.mode !== "entra") return { "X-User": $("user").value, "X-Scopes": $("scopes").value };
+  const request = { scopes: authConfig.scopes, account: msalApp.getActiveAccount() };
+  try {
+    return { Authorization: `Bearer ${(await msalApp.acquireTokenSilent(request)).accessToken}` };
+  } catch (e) {
+    if (e instanceof msal.InteractionRequiredAuthError) await msalApp.acquireTokenRedirect(request);
+    throw e;
+  }
+}
 
 async function api(path, options = {}) {
   const res = await fetch(`/api/v1${path}`, {
     ...options,
-    headers: {
-      "Content-Type": "application/json",
-      "X-User": $("user").value,
-      "X-Scopes": $("scopes").value,
-      ...(options.headers || {}),
-    },
+    headers: { "Content-Type": "application/json", ...(await authHeaders()), ...(options.headers || {}) },
   });
-  const body = res.status === 204 ? null : await res.json();
+  const text = await res.text();
+  const body = text ? JSON.parse(text) : null;
   if (!res.ok) throw new Error(body?.message || body?.detail || res.statusText);
   return body;
 }
@@ -61,13 +110,15 @@ async function loadUniverse() {
   if ($("u-status").value) q.set("status", $("u-status").value);
   const page = await api(`/instruments?${q}`);
   $("u-rows").innerHTML = page.items.map((i) => `<tr>
-    <td>${ids(i)}</td><td>${esc(i.status)}</td><td>${esc(i.fieldSets.join(", "))}</td>
+    <td>${ids(i)}${i.name ? `<br><span class="hint">${esc(i.name)}</span>` : ""}</td><td>${esc(i.status)}</td><td>${esc(i.fieldSets.join(", "))}</td>
     <td>${esc(i.categories.join(", "))}</td><td>${esc(i.subscribedSince)}</td><td>${esc(i.unsubscribeEffective)}</td>
-    <td>${i.status === "ACTIVE" ? `<button data-unsub='${esc(JSON.stringify(i.identifiers[0]))}'>Abbestellen</button>` : ""}</td>
+    <td><button data-ts="${esc(i.id)}" data-label="${esc(i.name || i.identifiers[0]?.value)}">Zeitreihe</button>
+      ${i.status === "ACTIVE" ? `<button data-unsub='${esc(JSON.stringify(i.identifiers[0]))}'>Abbestellen</button>` : ""}</td>
   </tr>`).join("") || `<tr><td colspan="7" class="hint">Keine Instrumente</td></tr>`;
 }
 $("universe-filter").addEventListener("submit", (e) => { e.preventDefault(); guard(loadUniverse); });
 $("u-rows").addEventListener("click", (e) => {
+  if (e.target.dataset?.ts) return guard(() => openSeries(e.target.dataset.ts, e.target.dataset.label));
   const raw = e.target.dataset?.unsub;
   if (!raw) return;
   guard(async () => {
@@ -76,6 +127,37 @@ $("u-rows").addEventListener("click", (e) => {
     await loadUniverse();
   });
 });
+
+// Zeitreihe (B-06, C1)
+const num = (v) => v !== null && v !== "" && isFinite(v) ? Number(v).toLocaleString("de-CH", { maximumFractionDigits: 4 }) : v;
+let seriesId = null;
+async function openSeries(id, label) {
+  seriesId = id;
+  $("ts-title").textContent = label;
+  const end = new Date(), start = new Date(Date.now() - 30 * 864e5);
+  $("ts-from").value ||= start.toISOString().slice(0, 10);
+  $("ts-to").value ||= end.toISOString().slice(0, 10);
+  $("series").hidden = false;
+  await loadSeries();
+}
+async function loadSeries() {
+  const q = new URLSearchParams({ instrumentId: seriesId, field: $("ts-field").value, from: $("ts-from").value, to: $("ts-to").value });
+  if ($("ts-asof").value) q.set("asOf", new Date($("ts-asof").value).toISOString().slice(0, 19));
+  const ts = await api(`/timeseries?${q}`);
+  $("ts-rows").innerHTML = ts.points.slice().reverse().map((p) => `<tr><td>${esc(p.date)}</td>
+    <td class="num">${esc(num(p.value))}</td><td class="hint">${esc(new Date(p.recordedAt + "Z").toLocaleString("de-CH"))}</td></tr>`).join("")
+    || `<tr><td colspan="3" class="hint">Keine Werte im Zeitraum</td></tr>`;
+}
+$("ts-form").addEventListener("submit", (e) => { e.preventDefault(); guard(loadSeries); });
+$("ts-close").addEventListener("click", () => ($("series").hidden = true));
+
+$("run-delivery").addEventListener("click", () => guard(async () => {
+  const r = await api("/deliveries/run", { method: "POST" });
+  const done = r.orders.filter((o) => o.status === "COMPLETED").length;
+  toast(`Tageslauf: ${done} Bestellung(en) abgeschlossen, ${r.instruments} Instrumente geliefert, `
+    + `${r.values ?? 0} neue Werte, ${r.corrections ?? 0} Korrekturen, ${r.removed.length} abbestellt`);
+  await loadUniverse();
+}));
 
 // Bestellen
 async function loadFieldSets() {
@@ -149,4 +231,6 @@ async function loadCosts() {
 $("cost-form").addEventListener("submit", (e) => { e.preventDefault(); guard(loadCosts); });
 
 const refresh = { universe: () => guard(loadUniverse), approvals: () => guard(loadApprovals), costs: () => guard(loadCosts) };
-if ($("user").value) { refresh.universe(); guard(loadFieldSets); }
+guard(async () => {
+  if (await initAuth()) { refresh.universe(); await loadFieldSets(); }
+});

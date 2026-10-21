@@ -2,12 +2,13 @@
 
 import csv
 import io
-from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
 
+from .auth import AuthError, EntraVerifier, User
+from .config import Settings
 from .models import (
     AuditEntry,
     CostEstimate,
@@ -30,21 +31,35 @@ from .service import LicenseService
 router = APIRouter(prefix="/api/v1")
 
 
-@dataclass(frozen=True)
-class User:
-    name: str
-    scopes: frozenset[str]
-
-
 def current_user(
+    request: Request,
+    authorization: Annotated[str | None, Header()] = None,
     x_user: Annotated[str | None, Header()] = None,
     x_scopes: Annotated[str | None, Header()] = None,
 ) -> User:
-    """Entwicklungsmodus: Benutzer und Scopes aus Headern. Im Betrieb durch OAuth2 ersetzen."""
+    verifier: EntraVerifier | None = request.app.state.verifier
+    if verifier is not None:
+        if not authorization or not authorization.startswith("Bearer "):
+            raise HTTPException(401, "Bearer-Token fehlt", headers={"WWW-Authenticate": "Bearer"})
+        try:
+            return verifier.verify(authorization.removeprefix("Bearer "))
+        except AuthError as e:
+            raise HTTPException(401, str(e), headers={"WWW-Authenticate": "Bearer"}) from e
+    # Entwicklungsmodus: Benutzer und Scopes aus Headern.
     if not x_user:
         raise HTTPException(401, "X-User fehlt")
     scopes = {s.strip() for s in (x_scopes or "lizenz.read").split(",") if s.strip()}
     return User(x_user, frozenset(scopes))
+
+
+@router.get("/auth/config")
+def auth_config(request: Request):
+    """Öffentlich: sagt dem Frontend, wie es sich anmelden soll."""
+    s: Settings = request.app.state.settings
+    if s.auth_mode != "entra":
+        return {"mode": "header"}
+    return {"mode": "entra", "tenantId": s.entra_tenant_id, "clientId": s.entra_spa_client_id,
+            "scopes": [f"api://{s.entra_api_client_id}/access_as_user"]}
 
 
 def require(scope: str):
@@ -150,6 +165,12 @@ def timeseries(svc: Svc, _: Reader,
 @router.get("/fields", response_model=list[FieldInfo])
 def fields(svc: Svc, _: Reader, search: str | None = None, category: str | None = None):
     return svc.fields(search, category)
+
+
+@router.post("/deliveries/run")
+def run_delivery(svc: Svc, user: Admin):
+    """Tageslauf auslösen (im Betrieb zeitgesteuert): Abbestellungen, offene Antworten, Tageslieferung."""
+    return svc.run_daily_delivery(user.name)
 
 
 @router.get("/field-sets", response_model=list[FieldSet])

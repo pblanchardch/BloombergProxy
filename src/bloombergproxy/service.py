@@ -23,7 +23,7 @@ from decimal import Decimal
 from sqlalchemy import Connection, Engine, and_, delete, func, insert, or_, select, update
 
 from . import db
-from .bloomberg import BloombergClient, UniverseChange, bbg_identifier
+from .bloomberg import BloombergClient, Delivery, UniverseChange, bbg_identifier, parse_identifier
 from .config import Settings
 from .models import (
     AuditEntry,
@@ -354,8 +354,146 @@ class LicenseService:
             conn.execute(update(db.instrument).where(i.instrument_id.in_(ids)).values(
                 status=InstrumentStatus.INACTIVE, updated_at=self.clock()))
             conn.execute(delete(db.instrument_field_set).where(db.instrument_field_set.c.instrument_id.in_(ids)))
+            o = db.order.c
+            conn.execute(update(db.order).where(
+                o.order_type == OrderType.UNSUBSCRIBE, o.status == OrderStatus.SUBMITTED, o.effective_date < today
+            ).values(status=OrderStatus.COMPLETED, bbg_request_id=request_id))
             self._audit(conn, user, "UNSUBSCRIBE_APPLIED", "instrument", ",".join(ids), {"bbgRequestId": request_id})
             return ids
+
+    # ---------------------------------------------------------- Lieferungen (C3)
+
+    def _instrument_id(self, conn: Connection, identifier: str) -> str | None:
+        id_type, value = parse_identifier(identifier)
+        column = db.instrument.c[IDENTIFIER_COLUMNS[id_type]]
+        return conn.execute(select(db.instrument.c.instrument_id).where(column == value)).scalar()
+
+    def _store(self, conn: Connection, delivery: Delivery) -> dict:
+        """Schreibt die Rohdaten nach bronze und die Werte bitemporal nach silver."""
+        now = self.clock()
+        lines = [{"identifier": r.identifier, "field": r.field, "date": r.value_date, "value": r.value}
+                 for r in delivery.records]
+        lines += [{"identifier": i, "error": code} for i, code in delivery.errors.items()]
+        if lines:
+            conn.execute(insert(db.bbg_response_raw), [
+                {"request_id": delivery.request_id, "file_name": f"{delivery.request_id}.json",
+                 "received_at": now, "line_no": n, "payload": json.dumps(line, default=str)}
+                for n, line in enumerate(lines, start=1)
+            ])
+
+        t = db.timeseries_value.c
+        written = corrected = 0
+        ids: dict[str, str | None] = {}
+        for r in delivery.records:
+            if r.identifier not in ids:
+                ids[r.identifier] = self._instrument_id(conn, r.identifier)
+            instrument_id = ids[r.identifier]
+            if instrument_id is None:
+                continue
+            numeric = isinstance(r.value, Decimal)
+            key = (t.instrument_id == instrument_id, t.field == r.field, t.value_date == r.value_date,
+                   t.superseded_at.is_(None))
+            current = conn.execute(select(t.value_num, t.value_str).where(*key)).first()
+            if current is not None:
+                old = current[0] if current[0] is not None else current[1]
+                if (Decimal(old) == r.value) if numeric and old is not None else (old == r.value):
+                    continue
+                conn.execute(update(db.timeseries_value).where(*key).values(superseded_at=now))
+                corrected += 1
+            conn.execute(insert(db.timeseries_value).values(
+                instrument_id=instrument_id, field=r.field, value_date=r.value_date,
+                value_num=r.value if numeric else None, value_str=None if numeric else r.value,
+                recorded_at=now, superseded_at=None, bbg_request_id=delivery.request_id))
+            written += 1
+            if r.field == "NAME" and r.value:
+                conn.execute(update(db.instrument).where(db.instrument.c.instrument_id == instrument_id)
+                             .values(name=r.value))
+        return {"values": written, "corrections": corrected}
+
+    def _drop_invalid(self, conn: Connection, errors: dict[str, str], user: str) -> list[str]:
+        """Ungültige Instrumente werden nicht geliefert und daher auch nicht abgerechnet."""
+        dropped = []
+        for identifier, code in errors.items():
+            instrument_id = self._instrument_id(conn, identifier)
+            if instrument_id is None:
+                continue
+            conn.execute(update(db.instrument).where(db.instrument.c.instrument_id == instrument_id).values(
+                status=InstrumentStatus.INACTIVE, updated_at=self.clock()))
+            conn.execute(delete(db.instrument_field_set).where(
+                db.instrument_field_set.c.instrument_id == instrument_id))
+            b = db.billing_instrument_month.c
+            conn.execute(delete(db.billing_instrument_month).where(
+                b.billing_month == self._month(), b.instrument_id == instrument_id))
+            self._audit(conn, user, "SECURITY_REJECTED", "instrument", instrument_id,
+                        {"identifier": identifier, "code": code})
+            dropped.append(instrument_id)
+        return dropped
+
+    def process_pending_deliveries(self, user: str = "system") -> list[dict]:
+        """Holt die Antworten zu übermittelten Bestellungen ab und schliesst diese ab."""
+        o = db.order.c
+        with self.engine.begin() as conn:
+            pending = conn.execute(select(o.order_id, o.bbg_request_id).where(
+                o.status == OrderStatus.SUBMITTED, o.order_type == OrderType.SUBSCRIBE,
+                o.bbg_request_id.is_not(None))).all()
+            results = []
+            for order_id, request_id in pending:
+                delivery = self.bloomberg.fetch(request_id)
+                if delivery is None:
+                    continue
+                stats = self._store(conn, delivery)
+                dropped = self._drop_invalid(conn, delivery.errors, user)
+                items = conn.execute(select(func.count()).select_from(db.order_item).where(
+                    db.order_item.c.order_id == order_id, db.order_item.c.is_duplicate.is_(False))).scalar_one()
+                status = OrderStatus.FAILED if dropped and len(dropped) >= items else OrderStatus.COMPLETED
+                conn.execute(update(db.order).where(o.order_id == order_id).values(status=status))
+                self._audit(conn, user, "DELIVERY_PROCESSED", "order", order_id,
+                            {"bbgRequestId": request_id, **stats, "errors": delivery.errors})
+                results.append({"orderId": order_id, "status": status, **stats, "errors": delivery.errors})
+            return results
+
+    def run_daily_delivery(self, user: str = "system") -> dict:
+        """Tageslauf: fällige Abbestellungen, offene Antworten, Tageslieferung des Universums.
+
+        Im Betrieb täglich nach Börsenschluss aufrufen (z. B. als Databricks-Job).
+        """
+        removed = self.apply_due_unsubscriptions(user)
+        orders = self.process_pending_deliveries(user)
+        now, today = self.clock(), self.clock().date()
+        i, f = db.instrument.c, db.instrument_field_set.c
+        with self.engine.begin() as conn:
+            rows = conn.execute(select(db.instrument).where(i.status.in_(
+                [InstrumentStatus.ACTIVE, InstrumentStatus.PENDING_UNSUBSCRIBE]))).mappings().all()
+            universe: dict[str, list[str]] = {}
+            for inst in rows:
+                field_sets = sorted(conn.execute(select(f.field_set_id).where(
+                    f.instrument_id == inst["instrument_id"])).scalars())
+                if not field_sets:
+                    continue
+                id_type = next(t for t, col in IDENTIFIER_COLUMNS.items() if inst[col])
+                universe[bbg_identifier(id_type, inst[IDENTIFIER_COLUMNS[id_type]])] = \
+                    self._fields(conn, field_sets)
+                # Im neuen Monat wird das Instrument mit der ersten Lieferung erneut abgerechnet.
+                for category in self._field_set_categories(conn, field_sets) - self._billed(
+                        conn, inst["instrument_id"]):
+                    conn.execute(insert(db.billing_instrument_month).values(
+                        billing_month=self._month(), instrument_id=inst["instrument_id"],
+                        category=category, first_requested_at=now))
+
+            summary: dict = {"date": today, "instruments": len(universe), "removed": removed, "orders": orders}
+            if universe:
+                request_id = self.bloomberg.request_snapshot(universe, today)
+                delivery = self.bloomberg.fetch(request_id)
+                summary["bbgRequestId"] = request_id
+                if delivery is not None:
+                    summary |= self._store(conn, delivery)
+                    summary["errors"] = delivery.errors
+            job_id = str(uuid.uuid4())
+            conn.execute(insert(db.job).values(
+                job_id=job_id, kind="DELIVERY", status="SUCCEEDED", started_at=now, finished_at=self.clock(),
+                summary=json.dumps(summary, default=str)))
+            self._audit(conn, user, "DAILY_DELIVERY", "job", job_id, summary)
+            return {"jobId": job_id, **summary}
 
     def _load_order(self, conn: Connection, order_id: str) -> Order:
         row = conn.execute(select(db.order).where(db.order.c.order_id == order_id)).mappings().first()

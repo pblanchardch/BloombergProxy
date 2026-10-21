@@ -7,7 +7,8 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .api import router
-from .bloomberg import BloombergClient, RecordingBloombergClient
+from .auth import EntraVerifier
+from .bloomberg import BloombergClient, MockBloombergClient
 from .config import Settings
 from .db import make_engine
 from .service import Conflict, Forbidden, Invalid, LicenseService, NotFound
@@ -16,11 +17,20 @@ STATIC = Path(__file__).parent / "static"
 
 
 def create_app(settings: Settings | None = None, bloomberg: BloombergClient | None = None,
-               service: LicenseService | None = None) -> FastAPI:
+               service: LicenseService | None = None, verifier: EntraVerifier | None = None) -> FastAPI:
     settings = settings or Settings()
     app = FastAPI(title="Bloomberg Datenlizenz-Management API", version="0.1.0")
+    app.state.settings = settings
+    if settings.auth_mode == "entra":
+        if not (settings.entra_tenant_id and settings.entra_api_client_id):
+            raise ValueError("Für auth_mode=entra fehlen BBGPROXY_ENTRA_TENANT_ID oder BBGPROXY_ENTRA_API_CLIENT_ID")
+        app.state.verifier = verifier or EntraVerifier(settings.entra_tenant_id, settings.entra_api_client_id)
+    elif settings.auth_mode == "header":
+        app.state.verifier = None
+    else:
+        raise ValueError(f"Unbekannter auth_mode: {settings.auth_mode}")
     app.state.service = service or LicenseService(
-        make_engine(settings.database_url), bloomberg or RecordingBloombergClient(), settings)
+        make_engine(settings.database_url), bloomberg or MockBloombergClient(), settings)
     app.include_router(router)
 
     for exc, code in ((NotFound, 404), (Conflict, 409), (Forbidden, 403), (Invalid, 400)):

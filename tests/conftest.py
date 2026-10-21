@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import insert
 
 from bloombergproxy import db
-from bloombergproxy.bloomberg import RecordingBloombergClient
+from bloombergproxy.bloomberg import MockBloombergClient, valid_isin
 from bloombergproxy.config import Settings
 from bloombergproxy.main import create_app
 from bloombergproxy.service import LicenseService
@@ -29,13 +29,13 @@ def clock():
 
 
 @pytest.fixture
-def bloomberg():
-    return RecordingBloombergClient()
+def bloomberg(clock):
+    return MockBloombergClient(clock=clock)
 
 
 @pytest.fixture
 def service(clock, bloomberg):
-    settings = Settings(database_url="sqlite://")
+    settings = Settings(database_url="sqlite://", auth_mode="header")
     engine = db.make_engine(settings.database_url)
     with engine.begin() as conn:
         conn.execute(insert(db.field_catalog), [
@@ -66,7 +66,7 @@ def service(clock, bloomberg):
 
 @pytest.fixture
 def client(service):
-    return TestClient(create_app(service=service))
+    return TestClient(create_app(Settings(auth_mode="header"), service=service))
 
 
 def as_user(name: str, *scopes: str) -> dict:
@@ -80,6 +80,15 @@ ADMIN = as_user("admin", "lizenz.read", "lizenz.admin")
 
 def isins(n: int, start: int = 0) -> list[dict]:
     return [{"type": "ISIN", "value": f"CH{i:010d}"} for i in range(start, start + n)]
+
+
+def valid_isins(n: int) -> list[dict]:
+    """ISINs mit korrekter Prüfziffer (die übrigen Test-ISINs meldet der Mock als ungültig)."""
+    result = []
+    for i in range(n):
+        stem = f"CH{i:09d}"
+        result.append({"type": "ISIN", "value": next(stem + str(d) for d in range(10) if valid_isin(stem + str(d)))})
+    return result
 
 
 def subscribe(client, instruments, field_sets=("PRICING_EOD",), headers=ALICE, **extra):

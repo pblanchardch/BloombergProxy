@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Bloomberg Lizenz</title>
+<link rel="icon" href="data:,">
 <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
@@ -14,6 +15,7 @@
     <label>Scopes <input id="scopes" value="lizenz.read,lizenz.order"></label>
     <button>Übernehmen</button>
   </form>
+  <span id="me" class="hint" hidden></span>
 </header>
 
 <nav>
@@ -32,7 +34,19 @@
         <option>ACTIVE</option><option>PENDING_UNSUBSCRIBE</option><option>INACTIVE</option>
       </select>
       <button>Suchen</button>
+      <button type="button" id="run-delivery" title="Benötigt lizenz.admin; im Betrieb zeitgesteuert">Tageslauf ausführen</button>
     </form>
+    <div id="series" class="card" hidden>
+      <div class="row"><strong id="ts-title"></strong><button type="button" id="ts-close">Schliessen</button></div>
+      <form id="ts-form" class="row">
+        <label>Feld <select id="ts-field"><option>PX_LAST</option><option>PX_VOLUME</option><option>NAME</option><option>CRNCY</option></select></label>
+        <label>Von <input id="ts-from" type="date"></label>
+        <label>Bis <input id="ts-to" type="date"></label>
+        <label>Wissensstand per (optional) <input id="ts-asof" type="datetime-local"></label>
+        <button>Anzeigen</button>
+      </form>
+      <table><thead><tr><th>Datum</th><th>Wert</th><th>Bekannt seit</th></tr></thead><tbody id="ts-rows"></tbody></table>
+    </div>
     <table>
       <thead><tr><th>Identifier</th><th>Status</th><th>Feldlisten</th><th>Kategorien</th><th>Seit</th><th>Abbestellt per</th><th></th></tr></thead>
       <tbody id="u-rows"></tbody>
