@@ -21,6 +21,24 @@ Anforderungskatalog: https://claude.ai/artifact/9GJaqQp9dmCtVSZANLy5cL
 - Zielplattform Databricks (Bronze, Silver, Gold)
 - 4-Augen-Freigabe ab 200 CHF Mehrkosten pro Bestellung
 
+## Mit Docker starten
+
+```bash
+docker compose up --build
+```
+
+Dann http://localhost:8000 öffnen (API-Dokumentation unter `/docs`). Oben als Benutzer z. B.
+`admin` mit den Scopes `lizenz.read,lizenz.order,lizenz.approve,lizenz.admin` eintragen.
+
+Die Compose-Datei startet eine Demo: Entwicklungsmodus ohne Entra ID, Bloomberg-Mock,
+Beispiel-Feldlisten mit Platzhalterpreisen, SQLite im Volume `daten` (bleibt über Neustarts
+erhalten). Den Tageslauf, der im Betrieb zeitgesteuert läuft, lösen Sie im Frontend aus oder mit
+`docker compose exec bloombergproxy bloombergproxy-job daily`. Zurücksetzen:
+`docker compose down -v`.
+
+Für den Betrieb das Image ohne `BBGPROXY_AUTH_MODE=header` und `BBGPROXY_DEMO_SEED` starten und
+die Entra- und Datenbank-Einstellungen setzen (siehe unten).
+
 ## Lokal starten
 
 ```bash

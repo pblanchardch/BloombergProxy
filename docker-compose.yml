@@ -1,0 +1,16 @@
+# Demo zum Ausprobieren: docker compose up --build, dann http://localhost:8000
+# Entwicklungsmodus ohne Entra ID, Bloomberg-Mock, SQLite im Volume "daten".
+services:
+  bloombergproxy:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      BBGPROXY_AUTH_MODE: header        # nur für die Demo; im Betrieb Entra ID
+      BBGPROXY_DEMO_SEED: "1"
+      BBGPROXY_BLOOMBERG_MOCK_STATE_DIR: /data/mock
+    volumes:
+      - daten:/data
+
+volumes:
+  daten:
