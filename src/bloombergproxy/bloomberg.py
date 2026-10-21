@@ -10,11 +10,13 @@ sobald Zugangsdaten und Katalog-ID vorliegen.
 """
 
 import hashlib
+import json
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
+from pathlib import Path
 from typing import Protocol
 
 
@@ -114,10 +116,36 @@ class MockBloombergClient:
     # Request-ID -> (Felder je Identifier, Stichtage, Tageslieferung mit Korrekturen?)
     _pending: dict[str, tuple[dict[str, list[str]], list[date], bool]] = field(default_factory=dict)
     _ca_pending: dict[str, tuple[list[str], date, date]] = field(default_factory=dict)
+    # Verzeichnis für offene Anfragen, damit Service und Job (getrennte Prozesse) sie teilen.
+    state_dir: str | None = None
+
+    def _persist(self, request_id: str, kind: str, payload: dict) -> None:
+        if self.state_dir:
+            Path(self.state_dir).mkdir(parents=True, exist_ok=True)
+            (Path(self.state_dir) / f"{request_id}.json").write_text(
+                json.dumps({"kind": kind, **payload}, default=str), encoding="utf-8")
+
+    def _restore(self, request_id: str) -> None:
+        """Lädt eine Anfrage, die ein anderer Prozess gestellt hat."""
+        path = Path(self.state_dir) / f"{request_id}.json" if self.state_dir else None
+        if path is None or not path.exists() or request_id in self._pending or request_id in self._ca_pending:
+            return
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if data["kind"] == "ca":
+            self._ca_pending[request_id] = (data["identifiers"], date.fromisoformat(data["start"]),
+                                            date.fromisoformat(data["end"]))
+        else:
+            self._pending[request_id] = (data["fields"], [date.fromisoformat(d) for d in data["dates"]],
+                                         data["snapshot"])
+
+    def _done(self, request_id: str) -> None:
+        if self.state_dir:
+            (Path(self.state_dir) / f"{request_id}.json").unlink(missing_ok=True)
 
     def _new(self, fields_by_identifier: dict[str, list[str]], dates: list[date], snapshot: bool) -> str:
         request_id = f"mock-{uuid.uuid4().hex[:12]}"
         self._pending[request_id] = (fields_by_identifier, dates, snapshot)
+        self._persist(request_id, "data", {"fields": fields_by_identifier, "dates": dates, "snapshot": snapshot})
         return request_id
 
     def submit(self, change: UniverseChange) -> str:
@@ -135,6 +163,7 @@ class MockBloombergClient:
     def request_corporate_actions(self, identifiers: list[str], start: date, end: date) -> str:
         request_id = f"mock-{uuid.uuid4().hex[:12]}"
         self._ca_pending[request_id] = (identifiers, start, end)
+        self._persist(request_id, "ca", {"identifiers": identifiers, "start": start, "end": end})
         return request_id
 
     def _actions(self, identifier: str, start: date, end: date) -> list[CorporateAction]:
@@ -161,6 +190,8 @@ class MockBloombergClient:
         return result
 
     def fetch(self, request_id: str) -> Delivery | None:
+        self._restore(request_id)
+        self._done(request_id)
         if request_id in self._ca_pending:
             identifiers, start, end = self._ca_pending.pop(request_id)
             valid = [i for i in identifiers if parse_identifier(i)[0] != "ISIN" or valid_isin(parse_identifier(i)[1])]

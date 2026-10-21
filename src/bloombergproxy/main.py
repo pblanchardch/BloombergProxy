@@ -37,7 +37,7 @@ def create_app(settings: Settings | None = None, bloomberg: BloombergClient | No
     else:
         raise ValueError(f"Unbekannter auth_mode: {settings.auth_mode}")
     app.state.service = service or LicenseService(
-        make_engine(settings.database_url), bloomberg or MockBloombergClient(), settings)
+        make_engine(settings.database_url), bloomberg or MockBloombergClient(state_dir=settings.bloomberg_mock_state_dir or None), settings)
     app.state.reconciler = Reconciler(app.state.service)
     app.state.quality = DataQuality(app.state.service)
     app.state.entitlements = Entitlements(app.state.service)

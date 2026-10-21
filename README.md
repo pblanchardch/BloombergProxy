@@ -121,6 +121,22 @@ in Schweizer Schreibweise (`1'250.50`). Trennzeichen und Spaltennamen sind über
   MSCI CCC…AAA, Sustainalytics Risiko 0–50 (niedriger = besser); mit den Verträgen abgleichen.
 - Die Nutzungsrechte der Kategorie `ESG` gelten auch hier.
 
+## Betrieb auf Databricks (C4)
+
+- Datenmodell: `db/ddl.sql` im Katalog `bbg_license` ausführen. Der Service spricht Databricks
+  über ein SQL Warehouse an: `BBGPROXY_DATABASE_URL=databricks://token:<token>@<host>?http_path=<pfad>&catalog=bbg_license`
+  und `pip install -e ".[databricks]"`.
+- Zeitgesteuerte Läufe über die Kommandozeile `bloombergproxy-job`:
+  - `bloombergproxy-job import-positions <verzeichnis>` importiert neue Xentis-Dateien
+    (bereits importierte Dateinamen werden übersprungen), z. B. aus einem Unity-Catalog-Volume;
+  - `bloombergproxy-job daily` führt den Tageslauf aus (Xentis-Abgleich, Lieferungen,
+    Corporate Actions, Datenqualität, Meldungen).
+- `databricks.yml` (Asset Bundle) richtet beides als Job ein: werktags 18:30 Zürcher Zeit,
+  Einzelknoten-Cluster, Zugangsdaten aus dem Secret-Scope `bloombergproxy`
+  (`database_url`, `notify_webhook_url`). `databricks bundle deploy -t prod`.
+- Solange der Mock aktiv ist, teilen Service und Job offene Anfragen über
+  `BBGPROXY_BLOOMBERG_MOCK_STATE_DIR` (z. B. ein Volume).
+
 ## Bloomberg-Mock
 
 Bis Zugangsdaten und Katalog-ID der Data License vorliegen, spricht der Service mit
@@ -163,7 +179,8 @@ Die API prüft Signatur, Aussteller, Audience und Ablauf; Berechtigungen kommen 
 ## Offen
 
 - **Bloomberg-Adapter** für die Data License REST API (ersetzt den Mock).
-- **Databricks:** Der Service ist bisher nur mit SQLite getestet.
+- **Databricks:** Service, Job und Bundle sind bisher nur mit SQLite bzw. ohne Workspace geprüft;
+  `databricks bundle validate` und ein erster Lauf gegen einen Workspace stehen aus.
 - **Preise:** Die Vertragswerte fehlen noch; Pflege über `PUT /pricing/categories`.
 - **Xentis-Dateiformat** bestätigen (siehe oben).
 - **Teams-Webhook** einrichten (`BBGPROXY_NOTIFY_WEBHOOK_URL`).

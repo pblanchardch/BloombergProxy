@@ -13,6 +13,10 @@ class Settings(BaseSettings):
     approval_threshold: Decimal = Decimal("200")
     currency: str = "CHF"
 
+    # Bloomberg-Mock: Verzeichnis für offene Anfragen, wenn Service und Job getrennt laufen
+    # (z. B. /Volumes/bbg_license/app/mock). Leer = nur im Arbeitsspeicher.
+    bloomberg_mock_state_dir: str = ""
+
     # Golden Copy (A4): Rangfolge der Quellen; nicht genannte Anbieter folgen alphabetisch.
     source_precedence: list[str] = ["BLOOMBERG"]
 
