@@ -12,6 +12,7 @@ from .auth import EntraVerifier
 from .bloomberg import BloombergClient, MockBloombergClient
 from .config import Settings
 from .db import make_engine
+from .entitlements import Entitlements
 from .quality import DataQuality
 from .reconcile import Reconciler
 from .service import Conflict, Forbidden, Invalid, LicenseService, NotFound
@@ -36,6 +37,7 @@ def create_app(settings: Settings | None = None, bloomberg: BloombergClient | No
         make_engine(settings.database_url), bloomberg or MockBloombergClient(), settings)
     app.state.reconciler = Reconciler(app.state.service)
     app.state.quality = DataQuality(app.state.service)
+    app.state.entitlements = Entitlements(app.state.service)
     app.include_router(router)
 
     @app.middleware("http")

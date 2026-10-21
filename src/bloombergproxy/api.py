@@ -27,6 +27,7 @@ from .models import (
     TimeSeries,
     UsageEntry,
 )
+from .entitlements import Entitlement, Entitlements, UsageByCategory
 from .jobs import daily_run
 from .quality import DataQuality, DqException, StatusChange
 from .reconcile import Reconciler
@@ -87,7 +88,12 @@ def quality(request: Request) -> DataQuality:
     return request.app.state.quality
 
 
+def entitlements(request: Request) -> Entitlements:
+    return request.app.state.entitlements
+
+
 Rec = Annotated[Reconciler, Depends(reconciler)]
+Ent = Annotated[Entitlements, Depends(entitlements)]
 Dq = Annotated[DataQuality, Depends(quality)]
 Reader = Annotated[User, Depends(require("lizenz.read"))]
 Orderer = Annotated[User, Depends(require("lizenz.order"))]
@@ -158,13 +164,14 @@ def put_pricing(prices: list[PricingCategory], svc: Svc, user: Admin):
 
 
 @router.get("/timeseries", response_model=TimeSeries)
-def timeseries(svc: Svc, _: Reader,
+def timeseries(svc: Svc, ent: Ent, user: Reader,
                instrument_id: Annotated[str, Query(alias="instrumentId")],
                field: str,
                start: Annotated[date, Query(alias="from")],
                end: Annotated[date, Query(alias="to")],
                as_of: Annotated[datetime | None, Query(alias="asOf")] = None,
                format: str = "json"):
+    ent.check_read(user, instrument_id, field, export=format == "csv")
     ts = svc.timeseries(instrument_id, field, start, end, as_of)
     if format != "csv":
         return ts
@@ -177,8 +184,25 @@ def timeseries(svc: Svc, _: Reader,
 
 
 @router.get("/fields", response_model=list[FieldInfo])
-def fields(svc: Svc, _: Reader, search: str | None = None, category: str | None = None):
-    return svc.fields(search, category)
+def fields(svc: Svc, ent: Ent, user: Reader, search: str | None = None, category: str | None = None):
+    rules = ent.annotate(user)
+    return [f.model_copy(update={"entitlement": rules.get(f.category)}) for f in svc.fields(search, category)]
+
+
+@router.get("/entitlements", response_model=list[Entitlement])
+def get_entitlements(ent: Ent, _: Reader):
+    return ent.all()
+
+
+@router.put("/entitlements")
+def put_entitlements(rules: list[Entitlement], ent: Ent, user: Admin):
+    ent.replace(rules, user.name)
+    return {"status": "ok"}
+
+
+@router.get("/entitlements/usage", response_model=list[UsageByCategory])
+def entitlement_usage(ent: Ent, _: Admin, month: Annotated[str, Query(pattern=r"^\d{4}-\d{2}$")]):
+    return ent.usage(month)
 
 
 @router.post("/deliveries/run")

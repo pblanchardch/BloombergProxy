@@ -210,7 +210,7 @@ $("o-type").addEventListener("change", () => {
 });
 
 function renderEstimate(est, order) {
-  const rows = est.byCategory.map((c) => `<tr><td>${esc(c.category)}</td><td class="num">${c.newUniqueInstruments}</td><td class="num">${money(c.cost, est.currency)}</td></tr>`).join("");
+  const rows = est.byCategory.map((c) => `<tr><td>${esc(c.category)}</td><td class="num">${c.newUniqueInstruments}</td><td class="num">${est.unpricedCategories.includes(c.category) ? '<span class="warn">Preis fehlt</span>' : money(c.cost, est.currency)}</td></tr>`).join("");
   $("o-result").innerHTML = `<div class="card">
     ${order ? `<p><strong>Bestellung ${esc(order.status)}</strong>${order.requiresApproval ? ' <span class="warn">– wartet auf Freigabe</span>' : ""}</p>` : ""}
     <p>Mehrkosten diesen Monat: <strong>${money(est.additionalMonthlyCost, est.currency)}</strong></p>
@@ -258,6 +258,13 @@ async function loadCosts() {
   $("c-rows").innerHTML = rows.map((r) => `<tr><td>${esc(r.category)}</td><td class="num">${r.uniqueInstruments}</td>
     <td class="num">${r.cost == null ? '<span class="warn">Preis fehlt</span>' : money(r.cost, r.currency)}</td></tr>`).join("")
     || `<tr><td colspan="3" class="hint">Keine Nutzung in diesem Monat</td></tr>`;
+  // Nutzung eingeschränkter Kategorien (B4), nur für lizenz.admin sichtbar
+  try {
+    const usage = await api(`/entitlements/usage?month=${$("c-month").value}`);
+    $("c-usage").innerHTML = `<h3>Zugriffe auf eingeschränkte Daten</h3><table><thead><tr><th>Kategorie</th><th>Benutzer und Anwendungen</th><th>Zugriffe</th></tr></thead><tbody>`
+      + (usage.map((u) => `<tr><td>${esc(u.category)}</td><td>${esc(u.users.join(", "))}</td><td class="num">${u.accesses}</td></tr>`).join("")
+        || `<tr><td colspan="3" class="hint">Keine Zugriffe</td></tr>`) + `</tbody></table>`;
+  } catch { $("c-usage").innerHTML = ""; }
 }
 $("cost-form").addEventListener("submit", (e) => { e.preventDefault(); guard(loadCosts); });
 

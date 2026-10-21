@@ -85,6 +85,14 @@ CREATE TABLE IF NOT EXISTS app.instrument_field_set (
   CONSTRAINT fk_ifs_set        FOREIGN KEY (field_set_id)  REFERENCES app.field_set
 );
 
+CREATE TABLE IF NOT EXISTS app.category_entitlement (
+  category        STRING  NOT NULL,
+  required_role   STRING  COMMENT 'Entra-App-Rolle zum Lesen, z. B. daten.esg; NULL = alle mit lizenz.read',
+  redistributable BOOLEAN NOT NULL COMMENT 'false = kein Export',
+  note            STRING,
+  CONSTRAINT pk_category_entitlement PRIMARY KEY (category)
+) COMMENT 'Nutzungsrechte je Datenkategorie (B4)';
+
 CREATE TABLE IF NOT EXISTS app.pricing_category (
   category             STRING        NOT NULL,
   valid_from           DATE          NOT NULL,

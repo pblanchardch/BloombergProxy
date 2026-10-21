@@ -67,6 +67,15 @@ instrument_field_set = Table(
     schema="app",
 )
 
+category_entitlement = Table(
+    "category_entitlement", metadata,
+    Column("category", String, primary_key=True),
+    Column("required_role", String),
+    Column("redistributable", Boolean, nullable=False, default=True),
+    Column("note", String),
+    schema="app",
+)
+
 pricing_category = Table(
     "pricing_category", metadata,
     Column("category", String, primary_key=True),

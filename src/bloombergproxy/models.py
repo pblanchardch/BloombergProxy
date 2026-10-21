@@ -147,6 +147,7 @@ class FieldInfo(ApiModel):
     description: str | None
     category: str
     price_per_instrument: Decimal | None
+    entitlement: dict | None = None  # requiredRole, redistributable, allowed (B4)
 
 
 class FieldSet(ApiModel):
@@ -163,4 +164,4 @@ class AuditEntry(ApiModel):
     action: str
     entity: str
     entity_id: str
-    details: dict | None
+    details: dict | list | None

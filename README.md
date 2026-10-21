@@ -59,6 +59,10 @@ Lokal läuft der Service mit SQLite. Für Databricks `BBGPROXY_DATABASE_URL` auf
   Tageslauf. Gespeichert und nach dem Commit per Webhook versandt; für Teams einen Workflow
   „Bei Empfang einer Webhookanforderung im Kanal posten“ anlegen und dessen URL als
   `BBGPROXY_NOTIFY_WEBHOOK_URL` setzen (`BBGPROXY_PUBLIC_URL` für den Link in der Karte)
+- Phase 2: Nutzungsrechte (B4) je Datenkategorie – Leserolle (Entra-App-Rolle, z. B.
+  `daten.esg`) und Weitergabe (sonst kein CSV-Export). Zugriffe auf eingeschränkte Kategorien
+  und Verweigerungen stehen im Prüfpfad; `GET /api/v1/entitlements/usage` listet je Monat, wer
+  zugegriffen hat (für Lizenzprüfungen)
 
 ## Universum folgt den Xentis-Positionen (B1)
 
@@ -126,5 +130,6 @@ Die API prüft Signatur, Aussteller, Audience und Ablauf; Berechtigungen kommen 
 - **Preise:** Die Vertragswerte fehlen noch; Pflege über `PUT /pricing/categories`.
 - **Xentis-Dateiformat** bestätigen (siehe oben).
 - **Teams-Webhook** einrichten (`BBGPROXY_NOTIFY_WEBHOOK_URL`).
-- **Phase 2, weiter:** Nutzungsrechte (B4).
+- **Nutzungsrechte** gemäss Vertrag erfassen (`PUT /api/v1/entitlements`) und die Rollen
+  (z. B. `daten.esg`) in der API-App-Registrierung anlegen.
 - **Abrechnung der Historie** mit dem Vertrag abgleichen (`BBGPROXY_HISTORY_CATEGORY`).

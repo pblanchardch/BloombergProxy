@@ -173,6 +173,7 @@ paths:
     get:
       tags: [Zeitreihen]
       summary: Zeitreihe eines Feldes abfragen, optional zu einem Stichtag (B-06, C1)
+      description: Prüft die Nutzungsrechte der Kategorie (B4); CSV-Export nur für weitergebbare Kategorien.
       parameters:
         - { name: instrumentId, in: query, required: true, schema: { type: string } }
         - { name: field, in: query, required: true, schema: { type: string, example: PX_LAST } }
@@ -358,6 +359,49 @@ paths:
         '200': { description: Ausnahme, content: { application/json: { schema: { $ref: '#/components/schemas/DataQualityException' } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
+
+  /entitlements:
+    get:
+      tags: [Governance]
+      summary: Nutzungsrechte je Datenkategorie (B4)
+      responses:
+        '200':
+          description: Regeln
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Entitlement' } }
+    put:
+      tags: [Governance]
+      summary: Nutzungsrechte ersetzen (Rolle lizenz.admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: array, items: { $ref: '#/components/schemas/Entitlement' } }
+      responses:
+        '200': { description: Gespeichert }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /entitlements/usage:
+    get:
+      tags: [Governance]
+      summary: Zugriffe auf eingeschränkte Kategorien im Monat (für Lizenzprüfungen)
+      parameters:
+        - { name: month, in: query, required: true, schema: { type: string, pattern: '^\d{4}-\d{2}$' } }
+      responses:
+        '200':
+          description: Je Kategorie die zugreifenden Benutzer und Anwendungen
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    category: { type: string }
+                    users: { type: array, items: { type: string } }
+                    accesses: { type: integer }
+        '403': { $ref: '#/components/responses/Forbidden' }
 
   /notifications:
     get:
@@ -559,6 +603,12 @@ components:
         description: { type: string }
         category: { type: string }
         pricePerInstrument: { type: number }
+        entitlement:
+          type: [object, 'null']
+          properties:
+            requiredRole: { type: string }
+            redistributable: { type: boolean }
+            allowed: { type: boolean, description: Darf der aufrufende Benutzer lesen }
     FieldSet:
       type: object
       properties:
@@ -593,6 +643,14 @@ components:
               isin: { type: string }
               action: { type: string, enum: [SUBSCRIBE, UNSUBSCRIBE] }
               reason: { type: string }
+    Entitlement:
+      type: object
+      required: [category]
+      properties:
+        category: { type: string }
+        requiredRole: { type: [string, 'null'], description: 'Entra-App-Rolle zum Lesen, z. B. daten.esg' }
+        redistributable: { type: boolean, default: true, description: false sperrt den CSV-Export }
+        note: { type: string }
     DataQualityException:
       type: object
       properties:
@@ -613,7 +671,7 @@ components:
         action: { type: string, example: ORDER_APPROVED }
         entity: { type: string }
         entityId: { type: string }
-        details: { type: object, additionalProperties: true }
+        details: { description: Objekt oder Liste, je nach Aktion }
     Error:
       type: object
       properties:
