@@ -225,6 +225,17 @@ paths:
             application/json:
               schema: { type: array, items: { $ref: '#/components/schemas/Field' } }
 
+  /field-sets:
+    get:
+      tags: [Katalog]
+      summary: Gebündelte Feldlisten mit Feldern und Kategorien (B3, D3)
+      responses:
+        '200':
+          description: Feldlisten
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/FieldSet' } }
+
   /universe/reconcile:
     post:
       tags: [Universum]
@@ -347,6 +358,7 @@ components:
             requestedAt: { type: string, format: date-time }
             approvedBy: { type: string }
             approvedAt: { type: string, format: date-time }
+            decisionComment: { type: string }
             effectiveDate: { type: string, format: date }
     CostEstimate:
       type: object
@@ -355,6 +367,10 @@ components:
         additionalMonthlyCost: { type: number, description: Mehrkosten im laufenden Monat }
         alreadyBilledInstruments: { type: integer, description: Diesen Monat schon abgerechnet, keine Mehrkosten }
         duplicates: { type: array, items: { $ref: '#/components/schemas/Identifier' }, description: Bereits im Universum (B3) }
+        unpricedCategories:
+          type: array
+          items: { type: string }
+          description: Kategorien ohne hinterlegten Preis; die Bestellung braucht dann immer eine Freigabe
         byCategory:
           type: array
           items:
@@ -417,6 +433,14 @@ components:
         description: { type: string }
         category: { type: string }
         pricePerInstrument: { type: number }
+    FieldSet:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        description: { type: string }
+        fields: { type: array, items: { type: string } }
+        categories: { type: array, items: { type: string } }
     DataQualityException:
       type: object
       properties:

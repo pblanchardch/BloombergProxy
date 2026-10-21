@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bloomberg Lizenz</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header>
+  <h1>Bloomberg Lizenz</h1>
+  <form id="who" class="who">
+    <label>Benutzer <input id="user" required></label>
+    <label>Scopes <input id="scopes" value="lizenz.read,lizenz.order"></label>
+    <button>Übernehmen</button>
+  </form>
+</header>
+
+<nav>
+  <button data-tab="universe" class="active">Universum</button>
+  <button data-tab="order">Bestellen</button>
+  <button data-tab="approvals">Freigaben</button>
+  <button data-tab="costs">Kosten</button>
+</nav>
+
+<main>
+  <section id="universe">
+    <form id="universe-filter" class="row">
+      <input id="u-search" placeholder="ISIN, FIGI, Ticker, Name">
+      <select id="u-status">
+        <option value="">Alle Status</option>
+        <option>ACTIVE</option><option>PENDING_UNSUBSCRIBE</option><option>INACTIVE</option>
+      </select>
+      <button>Suchen</button>
+    </form>
+    <table>
+      <thead><tr><th>Identifier</th><th>Status</th><th>Feldlisten</th><th>Kategorien</th><th>Seit</th><th>Abbestellt per</th><th></th></tr></thead>
+      <tbody id="u-rows"></tbody>
+    </table>
+  </section>
+
+  <section id="order" hidden>
+    <form id="order-form">
+      <label>Art
+        <select id="o-type"><option value="SUBSCRIBE">Bestellen</option><option value="UNSUBSCRIBE">Abbestellen</option></select>
+      </label>
+      <label>Identifier-Typ
+        <select id="o-idtype"><option>ISIN</option><option>FIGI</option><option>TICKER</option><option>CUSIP</option><option>SEDOL</option></select>
+      </label>
+      <label>Instrumente (eins pro Zeile)<textarea id="o-ids" rows="5" required></textarea></label>
+      <fieldset id="o-fieldsets"><legend>Feldlisten</legend></fieldset>
+      <label>Begründung <input id="o-reason"></label>
+      <div class="row">
+        <button type="button" id="o-estimate">Kosten prüfen</button>
+        <button>Bestellung absenden</button>
+      </div>
+    </form>
+    <div id="o-result"></div>
+  </section>
+
+  <section id="approvals" hidden>
+    <p class="hint">Bestellungen ab 200 CHF Mehrkosten oder mit Kategorien ohne Preis. Freigeben darf nur eine andere Person (Scope lizenz.approve).</p>
+    <table>
+      <thead><tr><th>Bestellt</th><th>Von</th><th>Art</th><th>Instrumente</th><th>Mehrkosten</th><th></th></tr></thead>
+      <tbody id="a-rows"></tbody>
+    </table>
+  </section>
+
+  <section id="costs" hidden>
+    <form id="cost-form" class="row"><input id="c-month" type="month" required><button>Anzeigen</button></form>
+    <table>
+      <thead><tr><th>Kategorie</th><th>Eindeutige Instrumente</th><th>Kosten</th></tr></thead>
+      <tbody id="c-rows"></tbody>
+    </table>
+  </section>
+</main>
+<div id="toast" hidden></div>
+<script src="/static/app.js"></script>
+</body>
+</html>
