@@ -1,0 +1,44 @@
+:root {
+  --bg: #ffffff;
+  --fg: #1d1d1f;
+  --muted: #6b6b70;
+  --line: #e2e2e6;
+  --accent: #0b62c4;
+  --warn: #a15c00;
+  --bad: #b3261e;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #17171a;
+    --fg: #ececf0;
+    --muted: #a0a0a8;
+    --line: #34343a;
+    --accent: #5aa2ff;
+    --warn: #f0b34a;
+    --bad: #ff8a80;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; font: 14px/1.45 system-ui, sans-serif; background: var(--bg); color: var(--fg); }
+header { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+h1 { font-size: 18px; margin: 0; }
+.who, .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; }
+nav { display: flex; gap: 4px; padding: 8px 16px; border-bottom: 1px solid var(--line); overflow-x: auto; }
+nav button { border: 0; background: none; padding: 6px 10px; border-radius: 6px; color: var(--muted); }
+nav button.active { color: var(--fg); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+main { padding: 16px; max-width: 1100px; }
+label { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; color: var(--muted); }
+input, select, textarea, button { font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
+button { cursor: pointer; }
+form button:last-child, #o-estimate { border-color: var(--accent); }
+fieldset { border: 1px solid var(--line); border-radius: 6px; margin: 0 0 10px; }
+fieldset label { flex-direction: row; align-items: center; color: var(--fg); margin: 2px 0; }
+table { width: 100%; border-collapse: collapse; margin-top: 12px; display: block; overflow-x: auto; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--muted); font-weight: 500; }
+td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.hint { color: var(--muted); }
+.warn { color: var(--warn); }
+.bad { color: var(--bad); }
+.card { border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin-top: 12px; }
+#toast { position: fixed; bottom: 16px; left: 16px; right: 16px; max-width: 480px; padding: 10px 12px; border-radius: 8px; background: var(--fg); color: var(--bg); }

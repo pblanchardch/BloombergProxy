@@ -10,7 +10,7 @@ info:
 servers:
   - url: https://lizenz-service.example.internal/api/v1
 security:
-  - oauth2: []
+  - entra: []
 
 tags:
   - name: Instrumente
@@ -225,6 +225,17 @@ paths:
             application/json:
               schema: { type: array, items: { $ref: '#/components/schemas/Field' } }
 
+  /field-sets:
+    get:
+      tags: [Katalog]
+      summary: Gebündelte Feldlisten mit Feldern und Kategorien (B3, D3)
+      responses:
+        '200':
+          description: Feldlisten
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/FieldSet' } }
+
   /universe/reconcile:
     post:
       tags: [Universum]
@@ -241,6 +252,49 @@ paths:
                 dryRun: { type: boolean, default: true, description: Nur Vorschlag, keine Bestellungen }
       responses:
         '202': { description: Gestartet, content: { application/json: { schema: { $ref: '#/components/schemas/Job' } } } }
+
+  /deliveries/run:
+    post:
+      tags: [Zeitreihen, Universum]
+      summary: Tageslauf auslösen (C3), im Betrieb zeitgesteuert
+      description: |
+        Wendet fällige Abbestellungen an, holt offene Bloomberg-Antworten ab, fordert die
+        Tageslieferung für das Universum an und speichert die Werte bitemporal. Rolle lizenz.admin.
+      responses:
+        '200':
+          description: Zusammenfassung des Laufs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  jobId: { type: string }
+                  date: { type: string, format: date }
+                  instruments: { type: integer }
+                  values: { type: integer }
+                  corrections: { type: integer }
+                  removed: { type: array, items: { type: string } }
+                  orders: { type: array, items: { type: object, additionalProperties: true } }
+                  errors: { type: object, additionalProperties: { type: string } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /auth/config:
+    get:
+      tags: [Governance]
+      summary: Anmeldekonfiguration für das Frontend (öffentlich)
+      security: []
+      responses:
+        '200':
+          description: Modus und Entra-Parameter
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  mode: { type: string, enum: [entra, header] }
+                  tenantId: { type: string }
+                  clientId: { type: string }
+                  scopes: { type: array, items: { type: string } }
 
   /data-quality/exceptions:
     get:
@@ -273,16 +327,23 @@ paths:
 
 components:
   securitySchemes:
-    oauth2:
+    entra:
       type: oauth2
+      description: |
+        Microsoft Entra ID. Berechtigungen sind App-Rollen der API-App-Registrierung im Claim
+        `roles`: lizenz.read (lesen), lizenz.order (bestellen, abbestellen), lizenz.approve
+        (freigeben), lizenz.admin (Preise, Tageslauf). Benutzer erhalten sie über die Zuweisung
+        in der Enterprise App, andere Systeme als Anwendungsberechtigung.
       flows:
-        clientCredentials:
-          tokenUrl: https://login.example.internal/oauth2/token
+        authorizationCode:
+          authorizationUrl: https://login.microsoftonline.com/{tenant}/oauth2/v2.0/authorize
+          tokenUrl: https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token
           scopes:
-            lizenz.read: Lesen
-            lizenz.order: Bestellen und abbestellen
-            lizenz.approve: Bestellungen freigeben
-            lizenz.admin: Preistabelle und Konfiguration pflegen
+            api://{api-client-id}/access_as_user: Zugriff im Namen des Benutzers
+        clientCredentials:
+          tokenUrl: https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token
+          scopes:
+            api://{api-client-id}/.default: Zugriff als Anwendung
 
   parameters:
     InstrumentId: { name: instrumentId, in: path, required: true, schema: { type: string } }
@@ -347,6 +408,7 @@ components:
             requestedAt: { type: string, format: date-time }
             approvedBy: { type: string }
             approvedAt: { type: string, format: date-time }
+            decisionComment: { type: string }
             effectiveDate: { type: string, format: date }
     CostEstimate:
       type: object
@@ -355,6 +417,10 @@ components:
         additionalMonthlyCost: { type: number, description: Mehrkosten im laufenden Monat }
         alreadyBilledInstruments: { type: integer, description: Diesen Monat schon abgerechnet, keine Mehrkosten }
         duplicates: { type: array, items: { $ref: '#/components/schemas/Identifier' }, description: Bereits im Universum (B3) }
+        unpricedCategories:
+          type: array
+          items: { type: string }
+          description: Kategorien ohne hinterlegten Preis; die Bestellung braucht dann immer eine Freigabe
         byCategory:
           type: array
           items:
@@ -417,6 +483,14 @@ components:
         description: { type: string }
         category: { type: string }
         pricePerInstrument: { type: number }
+    FieldSet:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        description: { type: string }
+        fields: { type: array, items: { type: string } }
+        categories: { type: array, items: { type: string } }
     DataQualityException:
       type: object
       properties:
