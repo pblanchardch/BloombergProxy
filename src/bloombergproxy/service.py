@@ -20,11 +20,12 @@ from collections.abc import Callable
 from datetime import date, datetime, timezone
 from decimal import Decimal
 
-from sqlalchemy import Connection, Engine, and_, delete, func, insert, or_, select, update
+from sqlalchemy import Connection, Engine, and_, case, delete, func, insert, or_, select, update
 
 from . import db
 from .bloomberg import BloombergClient, Delivery, UniverseChange, bbg_identifier, parse_identifier
 from .config import Settings
+from .notify import Notifier
 from .models import (
     AuditEntry,
     CategoryCost,
@@ -82,11 +83,13 @@ class LicenseService:
         bloomberg: BloombergClient,
         settings: Settings,
         clock: Callable[[], datetime] = utcnow,
+        notifier: Notifier | None = None,
     ):
         self.engine = engine
         self.bloomberg = bloomberg
         self.settings = settings
         self.clock = clock
+        self.notifier = notifier or Notifier(engine, settings, clock)
 
     # ------------------------------------------------------------------ Hilfen
 
@@ -158,6 +161,9 @@ class LicenseService:
             if not req.field_sets:
                 raise Invalid("Eine Bestellung braucht mindestens eine Feldliste")
             needed = self._field_set_categories(conn, req.field_sets)
+        elif req.type == OrderType.BACKFILL:
+            self._check_backfill(conn, req)
+            needed = {self.settings.history_category}
 
         for ident in req.instruments:
             key = (ident.type, ident.value)
@@ -172,6 +178,15 @@ class LicenseService:
                     new_categories = needed - (self._billed(conn, inst["instrument_id"]) if inst else set())
                     if new_categories:
                         new_per_category.update(new_categories)
+                    else:
+                        already_billed += 1
+            elif req.type == OrderType.BACKFILL:
+                if inst is None or inst["status"] not in (*SUBSCRIBED, InstrumentStatus.PENDING_UNSUBSCRIBE):
+                    raise Invalid(f"{ident.type} {ident.value} ist nicht im Universum; zuerst bestellen")
+                is_dup = key in seen
+                if not is_dup:
+                    if needed - self._billed(conn, inst["instrument_id"]):
+                        new_per_category.update(needed)
                     else:
                         already_billed += 1
             else:
@@ -206,13 +221,29 @@ class LicenseService:
         )
         return estimate, items
 
+    def _check_backfill(self, conn: Connection, req: OrderRequest) -> None:
+        if not req.fields:
+            raise Invalid("Ein Backfill braucht mindestens ein Feld")
+        if req.from_date is None or req.to_date is None or req.from_date > req.to_date:
+            raise Invalid("Ein Backfill braucht einen gültigen Zeitraum (from <= to)")
+        if req.to_date > self.clock().date():
+            raise Invalid("Ein Backfill kann nicht in die Zukunft reichen")
+        if (req.to_date - req.from_date).days > self.settings.backfill_max_days:
+            raise Invalid(f"Zeitraum länger als {self.settings.backfill_max_days} Tage")
+        f = db.field_catalog.c
+        known = set(conn.execute(select(f.mnemonic).where(f.mnemonic.in_(req.fields))).scalars())
+        missing = sorted(set(req.fields) - known)
+        if missing:
+            raise Invalid(f"Unbekannte Felder: {', '.join(missing)}")
+
     def estimate(self, req: OrderRequest) -> CostEstimate:
         with self.engine.connect() as conn:
             return self._plan(conn, req)[0]
 
     # -------------------------------------------------------------- Bestellungen
 
-    def create_order(self, req: OrderRequest, user: str, idempotency_key: str | None = None) -> Order:
+    def create_order(self, req: OrderRequest, user: str, idempotency_key: str | None = None,
+                     source: str = "MANUAL") -> Order:
         with self.engine.begin() as conn:
             if idempotency_key:
                 o = db.order.c
@@ -225,7 +256,7 @@ class LicenseService:
             if all(i["is_duplicate"] for i in items):
                 raise Invalid("Keine Änderung: alle Instrumente sind bereits im gewünschten Zustand")
 
-            requires_approval = req.type == OrderType.SUBSCRIBE and (
+            requires_approval = req.type in (OrderType.SUBSCRIBE, OrderType.BACKFILL) and (
                 estimate.additional_monthly_cost >= self.settings.approval_threshold
                 or bool(estimate.unpriced_categories)
             )
@@ -236,9 +267,13 @@ class LicenseService:
                 status=OrderStatus.PENDING_APPROVAL if requires_approval else OrderStatus.APPROVED,
                 reason=req.reason,
                 field_sets=",".join(req.field_sets),
+                history_fields=",".join(req.fields) or None,
+                history_from=req.from_date,
+                history_to=req.to_date,
                 estimated_cost_chf=estimate.additional_monthly_cost,
                 estimate_json=estimate.model_dump_json(by_alias=True),
                 requires_approval=requires_approval,
+                source=source,
                 requested_by=user,
                 requested_at=self.clock(),
                 idempotency_key=idempotency_key,
@@ -252,7 +287,15 @@ class LicenseService:
             self._audit(conn, user, "ORDER_CREATED", "order", order_id,
                         {"type": req.type, "cost": estimate.additional_monthly_cost,
                          "requiresApproval": requires_approval})
-            if not requires_approval:
+            if requires_approval:
+                kind = {OrderType.BACKFILL: "Backfill"}.get(req.type, "Bestellung")
+                cost = (f"{estimate.additional_monthly_cost} {estimate.currency}"
+                        + (f", ohne Preis: {', '.join(estimate.unpriced_categories)}"
+                           if estimate.unpriced_categories else ""))
+                self.notifier.add(conn, "ORDER_PENDING_APPROVAL", f"{kind} wartet auf Freigabe",
+                                  f"{user} hat {len(items)} Instrument(e) angefragt. Mehrkosten: {cost}.",
+                                  {"orderId": order_id})
+            else:
                 self._execute(conn, order_id, user)
             return self._load_order(conn, order_id)
 
@@ -281,6 +324,10 @@ class LicenseService:
                         {"comment": comment})
             if approve:
                 self._execute(conn, order_id, user)
+            else:
+                self.notifier.add(conn, "ORDER_REJECTED", "Bestellung abgelehnt",
+                                  f"{user} hat die Bestellung von {row['requested_by']} abgelehnt: {comment}",
+                                  {"orderId": order_id, "requestedBy": row["requested_by"]})
             return self._load_order(conn, order_id)
 
     def _execute(self, conn: Connection, order_id: str, user: str) -> None:
@@ -300,6 +347,20 @@ class LicenseService:
             self._audit(conn, user, "UNSUBSCRIBE_SCHEDULED", "order", order_id, {"effective": effective})
             return
 
+        if row["order_type"] == OrderType.BACKFILL:
+            for item in items:
+                if self.settings.history_category not in self._billed(conn, item["instrument_id"]):
+                    conn.execute(insert(db.billing_instrument_month).values(
+                        billing_month=self._month(), instrument_id=item["instrument_id"],
+                        category=self.settings.history_category, first_requested_at=now))
+            request_id = self.bloomberg.request_history(
+                [bbg_identifier(i["identifier_type"], i["identifier_value"]) for i in items],
+                row["history_fields"].split(","), row["history_from"], row["history_to"])
+            conn.execute(update(db.order).where(db.order.c.order_id == order_id).values(
+                status=OrderStatus.SUBMITTED, bbg_request_id=request_id, effective_date=today))
+            self._audit(conn, user, "BACKFILL_SUBMITTED", "order", order_id, {"bbgRequestId": request_id})
+            return
+
         field_sets = row["field_sets"].split(",")
         categories = self._field_set_categories(conn, field_sets)
         added = []
@@ -308,7 +369,7 @@ class LicenseService:
             if instrument_id is None:
                 instrument_id = str(uuid.uuid4())
                 conn.execute(insert(db.instrument).values(
-                    instrument_id=instrument_id, status=InstrumentStatus.ACTIVE, source="MANUAL",
+                    instrument_id=instrument_id, status=InstrumentStatus.ACTIVE, source=row["source"],
                     subscribed_since=today, created_at=now, updated_at=now,
                     **{IDENTIFIER_COLUMNS[item["identifier_type"]]: item["identifier_value"]},
                 ))
@@ -319,6 +380,9 @@ class LicenseService:
                 # Eine erneute Bestellung hebt eine vorgemerkte Abbestellung auf.
                 conn.execute(update(db.instrument).where(db.instrument.c.instrument_id == instrument_id).values(
                     status=InstrumentStatus.ACTIVE, unsubscribe_effective=None, updated_at=now,
+                    # Ein reaktiviertes Instrument gehört der Quelle, die es neu bestellt hat.
+                    source=case((db.instrument.c.status == InstrumentStatus.INACTIVE, row["source"]),
+                                else_=db.instrument.c.source),
                     subscribed_since=func.coalesce(db.instrument.c.subscribed_since, today)))
             for fs in set(field_sets) - self._instrument_field_sets(conn, instrument_id):
                 conn.execute(insert(db.instrument_field_set).values(
@@ -433,16 +497,17 @@ class LicenseService:
         """Holt die Antworten zu übermittelten Bestellungen ab und schliesst diese ab."""
         o = db.order.c
         with self.engine.begin() as conn:
-            pending = conn.execute(select(o.order_id, o.bbg_request_id).where(
-                o.status == OrderStatus.SUBMITTED, o.order_type == OrderType.SUBSCRIBE,
+            pending = conn.execute(select(o.order_id, o.bbg_request_id, o.order_type).where(
+                o.status == OrderStatus.SUBMITTED, o.order_type.in_([OrderType.SUBSCRIBE, OrderType.BACKFILL]),
                 o.bbg_request_id.is_not(None))).all()
             results = []
-            for order_id, request_id in pending:
+            for order_id, request_id, order_type in pending:
                 delivery = self.bloomberg.fetch(request_id)
                 if delivery is None:
                     continue
                 stats = self._store(conn, delivery)
-                dropped = self._drop_invalid(conn, delivery.errors, user)
+                # Ein Backfill betrifft nur Instrumente, die schon im Universum sind.
+                dropped = self._drop_invalid(conn, delivery.errors, user) if order_type == OrderType.SUBSCRIBE else []
                 items = conn.execute(select(func.count()).select_from(db.order_item).where(
                     db.order_item.c.order_id == order_id, db.order_item.c.is_duplicate.is_(False))).scalar_one()
                 status = OrderStatus.FAILED if dropped and len(dropped) >= items else OrderStatus.COMPLETED
@@ -450,6 +515,13 @@ class LicenseService:
                 self._audit(conn, user, "DELIVERY_PROCESSED", "order", order_id,
                             {"bbgRequestId": request_id, **stats, "errors": delivery.errors})
                 results.append({"orderId": order_id, "status": status, **stats, "errors": delivery.errors})
+                if delivery.errors:
+                    self.notifier.add(
+                        conn, "DELIVERY_ERRORS",
+                        "Bestellung fehlgeschlagen" if status == OrderStatus.FAILED else "Instrumente abgelehnt",
+                        f"Bloomberg hat {len(delivery.errors)} Instrument(e) abgelehnt: "
+                        + ", ".join(f"{i} ({c})" for i, c in delivery.errors.items()),
+                        {"orderId": order_id})
             return results
 
     def run_daily_delivery(self, user: str = "system") -> dict:
@@ -516,6 +588,10 @@ class LicenseService:
             approved_at=row["decided_at"] if row["status"] != OrderStatus.REJECTED else None,
             decision_comment=row["decision_comment"],
             effective_date=row["effective_date"],
+            source=row["source"],
+            fields=[f for f in (row["history_fields"] or "").split(",") if f],
+            from_date=row["history_from"],
+            to_date=row["history_to"],
         )
 
     def get_order(self, order_id: str) -> Order:

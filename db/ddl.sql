@@ -85,6 +85,14 @@ CREATE TABLE IF NOT EXISTS app.instrument_field_set (
   CONSTRAINT fk_ifs_set        FOREIGN KEY (field_set_id)  REFERENCES app.field_set
 );
 
+CREATE TABLE IF NOT EXISTS app.category_entitlement (
+  category        STRING  NOT NULL,
+  required_role   STRING  COMMENT 'Entra-App-Rolle zum Lesen, z. B. daten.esg; NULL = alle mit lizenz.read',
+  redistributable BOOLEAN NOT NULL COMMENT 'false = kein Export',
+  note            STRING,
+  CONSTRAINT pk_category_entitlement PRIMARY KEY (category)
+) COMMENT 'Nutzungsrechte je Datenkategorie (B4)';
+
 CREATE TABLE IF NOT EXISTS app.pricing_category (
   category             STRING        NOT NULL,
   valid_from           DATE          NOT NULL,
@@ -102,7 +110,11 @@ CREATE TABLE IF NOT EXISTS app.`order` (
   field_sets         STRING        COMMENT 'Kommagetrennte Feldlisten (nur SUBSCRIBE)',
   estimated_cost_chf DECIMAL(12,2) COMMENT 'Mehrkosten im laufenden Monat',
   estimate_json      STRING        COMMENT 'Kostenprognose zum Zeitpunkt der Bestellung (JSON)',
+  history_fields     STRING        COMMENT 'Nur BACKFILL: kommagetrennte Felder',
+  history_from       DATE,
+  history_to         DATE,
   requires_approval  BOOLEAN       NOT NULL COMMENT 'true ab 200 CHF',
+  source             STRING        NOT NULL COMMENT 'MANUAL oder XENTIS (automatischer Abgleich)',
   requested_by       STRING        NOT NULL,
   requested_at       TIMESTAMP     NOT NULL,
   decided_by         STRING        COMMENT 'Muss sich von requested_by unterscheiden',
@@ -112,8 +124,9 @@ CREATE TABLE IF NOT EXISTS app.`order` (
   bbg_request_id     STRING,
   idempotency_key    STRING,
   CONSTRAINT pk_order PRIMARY KEY (order_id),
-  CONSTRAINT ck_order_type   CHECK (order_type IN ('SUBSCRIBE','UNSUBSCRIBE')),
+  CONSTRAINT ck_order_type   CHECK (order_type IN ('SUBSCRIBE','UNSUBSCRIBE','BACKFILL')),
   CONSTRAINT ck_order_status CHECK (status IN ('DRAFT','PENDING_APPROVAL','APPROVED','REJECTED','SUBMITTED','COMPLETED','FAILED')),
+  CONSTRAINT ck_order_source CHECK (source IN ('MANUAL','XENTIS')),
   CONSTRAINT ck_order_4eyes  CHECK (decided_by IS NULL OR decided_by <> requested_by)
 ) COMMENT 'Bestellungen und Abbestellungen mit 4-Augen-Freigabe';
 
@@ -151,6 +164,20 @@ CREATE TABLE IF NOT EXISTS app.reconcile_proposal (
   CONSTRAINT fk_rp_job FOREIGN KEY (job_id) REFERENCES app.job,
   CONSTRAINT ck_rp_action CHECK (action IN ('SUBSCRIBE','UNSUBSCRIBE','KEEP'))
 ) COMMENT 'Ergebnis des täglichen Abgleichs mit Xentis (B1)';
+
+CREATE TABLE IF NOT EXISTS app.notification (
+  notification_id STRING    NOT NULL,
+  created_at      TIMESTAMP NOT NULL,
+  event           STRING    NOT NULL COMMENT 'z. B. ORDER_PENDING_APPROVAL, DQ_EXCEPTIONS',
+  title           STRING    NOT NULL,
+  text            STRING    NOT NULL,
+  details         STRING    COMMENT 'JSON',
+  status          STRING    NOT NULL,
+  error           STRING,
+  sent_at         TIMESTAMP,
+  CONSTRAINT pk_notification PRIMARY KEY (notification_id),
+  CONSTRAINT ck_notification_status CHECK (status IN ('PENDING','SENT','STORED','FAILED'))
+) COMMENT 'Benachrichtigungen (D4): gespeichert und nach dem Commit versandt';
 
 CREATE TABLE IF NOT EXISTS app.audit_log (
   at        TIMESTAMP NOT NULL,
@@ -265,9 +292,11 @@ CREATE TABLE IF NOT EXISTS gold.dq_exception (
   instrument_id STRING    NOT NULL,
   field         STRING    NOT NULL,
   value_date    DATE      NOT NULL,
+  detail        STRING    COMMENT 'z. B. Veränderung in Prozent',
   detected_at   TIMESTAMP NOT NULL,
   status        STRING    NOT NULL,
   handled_by    STRING,
+  handled_at    TIMESTAMP,
   CONSTRAINT pk_dq_exception PRIMARY KEY (exception_id),
   CONSTRAINT ck_dq_type   CHECK (type IN ('STALE_PRICE','OUTLIER','MISSING_VALUE')),
   CONSTRAINT ck_dq_status CHECK (status IN ('OPEN','ACKNOWLEDGED','RESOLVED'))

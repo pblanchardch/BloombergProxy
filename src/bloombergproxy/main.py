@@ -5,12 +5,16 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 
 from .api import router
 from .auth import EntraVerifier
 from .bloomberg import BloombergClient, MockBloombergClient
 from .config import Settings
 from .db import make_engine
+from .entitlements import Entitlements
+from .quality import DataQuality
+from .reconcile import Reconciler
 from .service import Conflict, Forbidden, Invalid, LicenseService, NotFound
 
 STATIC = Path(__file__).parent / "static"
@@ -31,7 +35,18 @@ def create_app(settings: Settings | None = None, bloomberg: BloombergClient | No
         raise ValueError(f"Unbekannter auth_mode: {settings.auth_mode}")
     app.state.service = service or LicenseService(
         make_engine(settings.database_url), bloomberg or MockBloombergClient(), settings)
+    app.state.reconciler = Reconciler(app.state.service)
+    app.state.quality = DataQuality(app.state.service)
+    app.state.entitlements = Entitlements(app.state.service)
     app.include_router(router)
+
+    @app.middleware("http")
+    async def flush_notifications(request: Request, call_next):
+        # Meldungen erst nach dem Commit der Anfrage versenden.
+        response = await call_next(request)
+        if request.method != "GET":
+            await run_in_threadpool(app.state.service.notifier.flush)
+        return response
 
     for exc, code in ((NotFound, 404), (Conflict, 409), (Forbidden, 403), (Invalid, 400)):
         def handler(_: Request, e: Exception, code=code, name=exc.__name__):

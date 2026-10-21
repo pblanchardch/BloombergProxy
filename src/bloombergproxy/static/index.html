@@ -23,6 +23,8 @@
   <button data-tab="order">Bestellen</button>
   <button data-tab="approvals">Freigaben</button>
   <button data-tab="costs">Kosten</button>
+  <button data-tab="quality">Datenqualität</button>
+  <button data-tab="messages">Meldungen</button>
 </nav>
 
 <main>
@@ -36,6 +38,16 @@
       <button>Suchen</button>
       <button type="button" id="run-delivery" title="Benötigt lizenz.admin; im Betrieb zeitgesteuert">Tageslauf ausführen</button>
     </form>
+    <details class="card">
+      <summary>Xentis-Abgleich (Rolle lizenz.admin)</summary>
+      <form id="x-form" class="row">
+        <label>Positionsdatei (CSV) <input id="x-file" type="file" accept=".csv,text/csv"></label>
+        <button type="button" id="x-import">Importieren</button>
+        <button type="button" id="x-dry">Abgleich testen</button>
+        <button type="button" id="x-run">Abgleich ausführen</button>
+      </form>
+      <div id="x-result"></div>
+    </details>
     <div id="series" class="card" hidden>
       <div class="row"><strong id="ts-title"></strong><button type="button" id="ts-close">Schliessen</button></div>
       <form id="ts-form" class="row">
@@ -48,7 +60,7 @@
       <table><thead><tr><th>Datum</th><th>Wert</th><th>Bekannt seit</th></tr></thead><tbody id="ts-rows"></tbody></table>
     </div>
     <table>
-      <thead><tr><th>Identifier</th><th>Status</th><th>Feldlisten</th><th>Kategorien</th><th>Seit</th><th>Abbestellt per</th><th></th></tr></thead>
+      <thead><tr><th>Identifier</th><th>Status</th><th>Quelle</th><th>Feldlisten</th><th>Kategorien</th><th>Seit</th><th>Abbestellt per</th><th></th></tr></thead>
       <tbody id="u-rows"></tbody>
     </table>
   </section>
@@ -56,13 +68,18 @@
   <section id="order" hidden>
     <form id="order-form">
       <label>Art
-        <select id="o-type"><option value="SUBSCRIBE">Bestellen</option><option value="UNSUBSCRIBE">Abbestellen</option></select>
+        <select id="o-type"><option value="SUBSCRIBE">Bestellen</option><option value="UNSUBSCRIBE">Abbestellen</option><option value="BACKFILL">Historie nachladen</option></select>
       </label>
       <label>Identifier-Typ
         <select id="o-idtype"><option>ISIN</option><option>FIGI</option><option>TICKER</option><option>CUSIP</option><option>SEDOL</option></select>
       </label>
       <label>Instrumente (eins pro Zeile)<textarea id="o-ids" rows="5" required></textarea></label>
       <fieldset id="o-fieldsets"><legend>Feldlisten</legend></fieldset>
+      <div id="o-history" class="row" hidden>
+        <label>Felder (kommagetrennt) <input id="o-fields" value="PX_LAST"></label>
+        <label>Von <input id="o-from" type="date"></label>
+        <label>Bis <input id="o-to" type="date"></label>
+      </div>
       <label>Begründung <input id="o-reason"></label>
       <div class="row">
         <button type="button" id="o-estimate">Kosten prüfen</button>
@@ -85,6 +102,24 @@
     <table>
       <thead><tr><th>Kategorie</th><th>Eindeutige Instrumente</th><th>Kosten</th></tr></thead>
       <tbody id="c-rows"></tbody>
+    </table>
+    <div id="c-usage"></div>
+  </section>
+  <section id="quality" hidden>
+    <form id="dq-form" class="row">
+      <select id="dq-status"><option value="OPEN">Offen</option><option value="ACKNOWLEDGED">In Bearbeitung</option><option value="RESOLVED">Erledigt</option><option value="">Alle</option></select>
+      <button>Anzeigen</button>
+    </form>
+    <table>
+      <thead><tr><th>Datum</th><th>Art</th><th>Instrument</th><th>Feld</th><th>Detail</th><th>Status</th><th></th></tr></thead>
+      <tbody id="dq-rows"></tbody>
+    </table>
+  </section>
+  <section id="messages" hidden>
+    <p class="hint">Ist ein Webhook eingerichtet, gehen die Meldungen zusätzlich an den Teams-Kanal.</p>
+    <table>
+      <thead><tr><th>Zeit</th><th>Meldung</th><th>Versand</th></tr></thead>
+      <tbody id="m-rows"></tbody>
     </table>
   </section>
 </main>

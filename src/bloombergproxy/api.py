@@ -6,6 +6,7 @@ from datetime import date, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
+from pydantic import BaseModel
 
 from .auth import AuthError, EntraVerifier, User
 from .config import Settings
@@ -26,6 +27,10 @@ from .models import (
     TimeSeries,
     UsageEntry,
 )
+from .entitlements import Entitlement, Entitlements, UsageByCategory
+from .jobs import daily_run
+from .quality import DataQuality, DqException, StatusChange
+from .reconcile import Reconciler
 from .service import LicenseService
 
 router = APIRouter(prefix="/api/v1")
@@ -74,7 +79,22 @@ def service(request: Request) -> LicenseService:
     return request.app.state.service
 
 
+def reconciler(request: Request) -> Reconciler:
+    return request.app.state.reconciler
+
+
 Svc = Annotated[LicenseService, Depends(service)]
+def quality(request: Request) -> DataQuality:
+    return request.app.state.quality
+
+
+def entitlements(request: Request) -> Entitlements:
+    return request.app.state.entitlements
+
+
+Rec = Annotated[Reconciler, Depends(reconciler)]
+Ent = Annotated[Entitlements, Depends(entitlements)]
+Dq = Annotated[DataQuality, Depends(quality)]
 Reader = Annotated[User, Depends(require("lizenz.read"))]
 Orderer = Annotated[User, Depends(require("lizenz.order"))]
 Approver = Annotated[User, Depends(require("lizenz.approve"))]
@@ -144,13 +164,14 @@ def put_pricing(prices: list[PricingCategory], svc: Svc, user: Admin):
 
 
 @router.get("/timeseries", response_model=TimeSeries)
-def timeseries(svc: Svc, _: Reader,
+def timeseries(svc: Svc, ent: Ent, user: Reader,
                instrument_id: Annotated[str, Query(alias="instrumentId")],
                field: str,
                start: Annotated[date, Query(alias="from")],
                end: Annotated[date, Query(alias="to")],
                as_of: Annotated[datetime | None, Query(alias="asOf")] = None,
                format: str = "json"):
+    ent.check_read(user, instrument_id, field, export=format == "csv")
     ts = svc.timeseries(instrument_id, field, start, end, as_of)
     if format != "csv":
         return ts
@@ -163,19 +184,77 @@ def timeseries(svc: Svc, _: Reader,
 
 
 @router.get("/fields", response_model=list[FieldInfo])
-def fields(svc: Svc, _: Reader, search: str | None = None, category: str | None = None):
-    return svc.fields(search, category)
+def fields(svc: Svc, ent: Ent, user: Reader, search: str | None = None, category: str | None = None):
+    rules = ent.annotate(user)
+    return [f.model_copy(update={"entitlement": rules.get(f.category)}) for f in svc.fields(search, category)]
+
+
+@router.get("/entitlements", response_model=list[Entitlement])
+def get_entitlements(ent: Ent, _: Reader):
+    return ent.all()
+
+
+@router.put("/entitlements")
+def put_entitlements(rules: list[Entitlement], ent: Ent, user: Admin):
+    ent.replace(rules, user.name)
+    return {"status": "ok"}
+
+
+@router.get("/entitlements/usage", response_model=list[UsageByCategory])
+def entitlement_usage(ent: Ent, _: Admin, month: Annotated[str, Query(pattern=r"^\d{4}-\d{2}$")]):
+    return ent.usage(month)
 
 
 @router.post("/deliveries/run")
-def run_delivery(svc: Svc, user: Admin):
-    """Tageslauf auslösen (im Betrieb zeitgesteuert): Abbestellungen, offene Antworten, Tageslieferung."""
-    return svc.run_daily_delivery(user.name)
+def run_delivery(rec: Rec, dq: Dq, user: Admin):
+    """Tageslauf auslösen (im Betrieb zeitgesteuert): Xentis-Abgleich, Lieferungen, Datenqualität."""
+    return daily_run(rec, dq, user.name)
+
+
+@router.get("/data-quality/exceptions", response_model=list[DqException])
+def dq_exceptions(dq: Dq, _: Reader, type: str | None = None, status: str | None = None):
+    return dq.list(type, status)
+
+
+@router.post("/data-quality/exceptions/{exception_id}/status", response_model=DqException)
+def dq_status(exception_id: str, change: StatusChange, dq: Dq, user: Orderer):
+    return dq.set_status(exception_id, change, user.name)
+
+
+@router.post("/positions/import")
+async def import_positions(request: Request, rec: Rec, user: Admin,
+                           file_name: Annotated[str, Query(alias="fileName")] = "upload.csv"):
+    """Xentis-Positionsdatei (CSV) importieren."""
+    raw = await request.body()
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        text = raw.decode("cp1252")
+    return rec.import_positions(text, file_name, user.name)
+
+
+class ReconcileRequest(BaseModel):
+    dryRun: bool = True
+
+
+@router.post("/universe/reconcile", status_code=202)
+def reconcile(rec: Rec, user: Admin, body: ReconcileRequest | None = None):
+    return rec.reconcile(dry_run=body.dryRun if body else True, user=user.name)
+
+
+@router.get("/jobs/{job_id}")
+def get_job(job_id: str, rec: Rec, _: Reader):
+    return rec.get_job(job_id)
 
 
 @router.get("/field-sets", response_model=list[FieldSet])
 def field_sets(svc: Svc, _: Reader):
     return svc.field_sets()
+
+
+@router.get("/notifications")
+def notifications(svc: Svc, _: Reader, limit: Annotated[int, Query(ge=1, le=500)] = 100):
+    return svc.notifier.recent(limit)
 
 
 @router.get("/audit", response_model=list[AuditEntry])

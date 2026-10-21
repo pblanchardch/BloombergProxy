@@ -30,6 +30,7 @@ class InstrumentStatus(StrEnum):
 class OrderType(StrEnum):
     SUBSCRIBE = "SUBSCRIBE"
     UNSUBSCRIBE = "UNSUBSCRIBE"
+    BACKFILL = "BACKFILL"
 
 
 class OrderStatus(StrEnum):
@@ -69,6 +70,10 @@ class OrderRequest(ApiModel):
     instruments: list[Identifier] = Field(min_length=1)
     field_sets: list[str] = []
     reason: str | None = None
+    # Nur BACKFILL (C2): Felder und Zeitraum der Historie
+    fields: list[str] = []
+    from_date: date | None = Field(default=None, alias="from")
+    to_date: date | None = Field(default=None, alias="to")
 
 
 class CategoryCost(ApiModel):
@@ -97,6 +102,7 @@ class Order(OrderRequest):
     approved_at: datetime | None = None
     decision_comment: str | None = None
     effective_date: date | None = None
+    source: str = "MANUAL"
 
 
 class OrderPage(ApiModel):
@@ -141,6 +147,7 @@ class FieldInfo(ApiModel):
     description: str | None
     category: str
     price_per_instrument: Decimal | None
+    entitlement: dict | None = None  # requiredRole, redistributable, allowed (B4)
 
 
 class FieldSet(ApiModel):
@@ -157,4 +164,4 @@ class AuditEntry(ApiModel):
     action: str
     entity: str
     entity_id: str
-    details: dict | None
+    details: dict | list | None

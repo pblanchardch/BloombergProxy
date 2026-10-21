@@ -67,6 +67,15 @@ instrument_field_set = Table(
     schema="app",
 )
 
+category_entitlement = Table(
+    "category_entitlement", metadata,
+    Column("category", String, primary_key=True),
+    Column("required_role", String),
+    Column("redistributable", Boolean, nullable=False, default=True),
+    Column("note", String),
+    schema="app",
+)
+
 pricing_category = Table(
     "pricing_category", metadata,
     Column("category", String, primary_key=True),
@@ -86,7 +95,11 @@ order = Table(
     Column("field_sets", String),
     Column("estimated_cost_chf", Numeric(12, 2)),
     Column("estimate_json", String),
+    Column("history_fields", String),
+    Column("history_from", Date),
+    Column("history_to", Date),
     Column("requires_approval", Boolean, nullable=False),
+    Column("source", String, nullable=False, default="MANUAL"),
     Column("requested_by", String, nullable=False),
     Column("requested_at", DateTime, nullable=False),
     Column("decided_by", String),
@@ -131,6 +144,20 @@ job = Table(
     schema="app",
 )
 
+notification = Table(
+    "notification", metadata,
+    Column("notification_id", String, primary_key=True),
+    Column("created_at", DateTime, nullable=False),
+    Column("event", String, nullable=False),
+    Column("title", String, nullable=False),
+    Column("text", String, nullable=False),
+    Column("details", String),
+    Column("status", String, nullable=False),
+    Column("error", String),
+    Column("sent_at", DateTime),
+    schema="app",
+)
+
 bbg_response_raw = Table(
     "bbg_response_raw", metadata,
     Column("request_id", String, nullable=False),
@@ -147,6 +174,52 @@ billing_instrument_month = Table(
     Column("instrument_id", String, primary_key=True),
     Column("category", String, primary_key=True),
     Column("first_requested_at", DateTime, nullable=False),
+    schema="gold",
+)
+
+position = Table(
+    "position", metadata,
+    Column("as_of_date", Date, nullable=False),
+    Column("portfolio", String, nullable=False),
+    Column("isin", String),
+    Column("instrument_id", String),
+    Column("quantity", Numeric(28, 6)),
+    schema="silver",
+)
+
+xentis_positions_raw = Table(
+    "xentis_positions_raw", metadata,
+    Column("delivery_date", Date, nullable=False),
+    Column("file_name", String, nullable=False),
+    Column("received_at", DateTime, nullable=False),
+    Column("line_no", Integer, nullable=False),
+    Column("payload", String, nullable=False),
+    schema="bronze",
+)
+
+reconcile_proposal = Table(
+    "reconcile_proposal", metadata,
+    Column("job_id", String, nullable=False),
+    Column("instrument_id", String),
+    Column("isin", String),
+    Column("action", String, nullable=False),
+    Column("reason", String),
+    Column("order_id", String),
+    schema="app",
+)
+
+dq_exception = Table(
+    "dq_exception", metadata,
+    Column("exception_id", String, primary_key=True),
+    Column("type", String, nullable=False),
+    Column("instrument_id", String, nullable=False),
+    Column("field", String, nullable=False),
+    Column("value_date", Date, nullable=False),
+    Column("detail", String),
+    Column("detected_at", DateTime, nullable=False),
+    Column("status", String, nullable=False),
+    Column("handled_by", String),
+    Column("handled_at", DateTime),
     schema="gold",
 )
 

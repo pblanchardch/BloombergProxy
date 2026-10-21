@@ -13,6 +13,34 @@ class Settings(BaseSettings):
     approval_threshold: Decimal = Decimal("200")
     currency: str = "CHF"
 
+    # Backfill (C2): Abrechnungskategorie für Historien-Anfragen und maximaler Zeitraum.
+    # Annahme: Bloomberg rechnet Historie je Instrument und Monat ab; mit dem Vertrag abgleichen.
+    history_category: str = "History"
+    backfill_max_days: int = 3650
+
+    # Datenqualität (D1)
+    dq_stale_days: int = 3          # PX_LAST so viele Liefertage unverändert -> STALE_PRICE
+    dq_outlier_share: float = 0.2   # Veränderung zum Vortag über 20 % -> OUTLIER
+
+    # Xentis-Positionsdatei (CSV). Spaltennamen an den tatsächlichen Export anpassen.
+    xentis_delimiter: str = ";"
+    xentis_col_date: str = "Stichtag"
+    xentis_col_portfolio: str = "Portfolio"
+    xentis_col_isin: str = "ISIN"
+    xentis_col_quantity: str = "Bestand"
+    # Feldlisten, mit denen der Abgleich neue Positionen bestellt (B1).
+    xentis_field_sets: list[str] = ["PRICING_EOD"]
+    # Abgleich im Tageslauf ausführen; sonst nur über POST /universe/reconcile.
+    xentis_auto_reconcile: bool = True
+    # Sicherung gegen unvollständige Dateien: Würde der Abgleich mehr als diesen Anteil der
+    # Xentis-Instrumente abbestellen, bestellt er nichts ab und meldet das.
+    xentis_max_unsubscribe_share: float = 0.2
+
+    # Benachrichtigungen (D4): Webhook, z. B. Teams-Workflow; leer = nur im Service sichtbar.
+    notify_webhook_url: str = ""
+    notify_webhook_format: str = "teams"  # "teams" (Adaptive Card) oder "plain" (JSON)
+    public_url: str = ""  # Link in den Meldungen, z. B. https://lizenz.firma.ch
+
     # "entra": Bearer-Token von Microsoft Entra ID (Standard, Betrieb).
     # "header": Benutzer und Scopes aus X-User / X-Scopes (nur Entwicklung, ohne Prüfung).
     auth_mode: str = "entra"

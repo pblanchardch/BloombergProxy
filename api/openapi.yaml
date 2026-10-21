@@ -53,7 +53,7 @@ paths:
   /orders:
     post:
       tags: [Bestellungen]
-      summary: Instrumente bestellen oder abbestellen (B-01, B-02)
+      summary: Instrumente bestellen, abbestellen oder Historie nachladen (B-01, B-02, C2)
       description: |
         Legt eine Bestellung an. Der Service prüft Duplikate (B3) und berechnet die Mehrkosten (B2).
         Ab 200 CHF Mehrkosten pro Bestellung erhält sie den Status PENDING_APPROVAL und braucht eine
@@ -173,6 +173,7 @@ paths:
     get:
       tags: [Zeitreihen]
       summary: Zeitreihe eines Feldes abfragen, optional zu einem Stichtag (B-06, C1)
+      description: Prüft die Nutzungsrechte der Kategorie (B4); CSV-Export nur für weitergebbare Kategorien.
       parameters:
         - { name: instrumentId, in: query, required: true, schema: { type: string } }
         - { name: field, in: query, required: true, schema: { type: string, example: PX_LAST } }
@@ -190,18 +191,6 @@ paths:
             application/json: { schema: { $ref: '#/components/schemas/TimeSeries' } }
             text/csv: { schema: { type: string } }
         '403': { $ref: '#/components/responses/Forbidden' }
-  /backfills:
-    post:
-      tags: [Zeitreihen]
-      summary: Historische Daten nachladen (C2)
-      description: Löst einen Bloomberg-History-Request aus; Kosten werden vorab geschätzt und unterliegen derselben Freigaberegel.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/BackfillRequest' }
-      responses:
-        '202': { description: Angenommen, content: { application/json: { schema: { $ref: '#/components/schemas/Job' } } } }
   /jobs/{jobId}:
     get:
       tags: [Zeitreihen, Universum]
@@ -236,13 +225,46 @@ paths:
             application/json:
               schema: { type: array, items: { $ref: '#/components/schemas/FieldSet' } }
 
+  /positions/import:
+    post:
+      tags: [Universum]
+      summary: Xentis-Positionsdatei importieren (B1)
+      description: |
+        CSV mit Stichtag, Portfolio, ISIN und Bestand (Spaltennamen und Trennzeichen konfigurierbar).
+        Eine erneute Lieferung für denselben Stichtag ersetzt die frühere. Rolle lizenz.admin.
+      parameters:
+        - { name: fileName, in: query, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          text/csv: { schema: { type: string } }
+      responses:
+        '200':
+          description: Import-Ergebnis
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  asOfDates: { type: array, items: { type: string, format: date } }
+                  rows: { type: integer }
+                  skipped:
+                    type: array
+                    items: { type: object, properties: { line: { type: integer }, reason: { type: string } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
   /universe/reconcile:
     post:
       tags: [Universum]
       summary: Abgleich mit den Xentis-Positionen starten (B1)
       description: |
-        Läuft automatisch einmal täglich nach der Xentis-Lieferung. Neue Positionen erzeugen
-        Bestellungen, geschlossene Positionen werden zur Abbestellung zum Monatsende vorgemerkt.
+        Läuft im Tageslauf automatisch. Gehaltene ISINs ausserhalb des Universums werden mit den
+        Standard-Feldlisten bestellt (Kostenprognose, ab 200 CHF Freigabe durch eine Person).
+        Vom Abgleich bestellte Instrumente, die nicht mehr gehalten werden, werden zum Monatsende
+        abbestellt. Manuell bestellte Instrumente bleiben unberührt. Würde mehr als der
+        konfigurierte Anteil (Standard 20 %) abbestellt, unterbleiben die Abbestellungen.
+        Rolle lizenz.admin.
       requestBody:
         content:
           application/json:
@@ -251,7 +273,12 @@ paths:
               properties:
                 dryRun: { type: boolean, default: true, description: Nur Vorschlag, keine Bestellungen }
       responses:
-        '202': { description: Gestartet, content: { application/json: { schema: { $ref: '#/components/schemas/Job' } } } }
+        '202':
+          description: Ergebnis des Abgleichs
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReconcileResult' }
+        '400': { $ref: '#/components/responses/BadRequest' }
 
   /deliveries/run:
     post:
@@ -299,7 +326,10 @@ paths:
   /data-quality/exceptions:
     get:
       tags: [Governance]
-      summary: Offene Datenqualitäts-Ausnahmen (D1)
+      summary: Datenqualitäts-Ausnahmen (D1)
+      description: |
+        Nach jeder Tageslieferung geprüft: fehlende Werte, seit mehreren Liefertagen unveränderter
+        PX_LAST (Standard 3), Veränderung von PX_LAST zum Vortag über 20 %.
       parameters:
         - { name: type, in: query, schema: { type: string, enum: [STALE_PRICE, OUTLIER, MISSING_VALUE] } }
         - { name: status, in: query, schema: { type: string, enum: [OPEN, ACKNOWLEDGED, RESOLVED] } }
@@ -309,6 +339,97 @@ paths:
           content:
             application/json:
               schema: { type: array, items: { $ref: '#/components/schemas/DataQualityException' } }
+  /data-quality/exceptions/{exceptionId}/status:
+    post:
+      tags: [Governance]
+      summary: Ausnahme übernehmen oder erledigen (D1)
+      parameters:
+        - { name: exceptionId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { type: string, enum: [OPEN, ACKNOWLEDGED, RESOLVED] }
+                comment: { type: string }
+      responses:
+        '200': { description: Ausnahme, content: { application/json: { schema: { $ref: '#/components/schemas/DataQualityException' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /entitlements:
+    get:
+      tags: [Governance]
+      summary: Nutzungsrechte je Datenkategorie (B4)
+      responses:
+        '200':
+          description: Regeln
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Entitlement' } }
+    put:
+      tags: [Governance]
+      summary: Nutzungsrechte ersetzen (Rolle lizenz.admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: array, items: { $ref: '#/components/schemas/Entitlement' } }
+      responses:
+        '200': { description: Gespeichert }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /entitlements/usage:
+    get:
+      tags: [Governance]
+      summary: Zugriffe auf eingeschränkte Kategorien im Monat (für Lizenzprüfungen)
+      parameters:
+        - { name: month, in: query, required: true, schema: { type: string, pattern: '^\d{4}-\d{2}$' } }
+      responses:
+        '200':
+          description: Je Kategorie die zugreifenden Benutzer und Anwendungen
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    category: { type: string }
+                    users: { type: array, items: { type: string } }
+                    accesses: { type: integer }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /notifications:
+    get:
+      tags: [Governance]
+      summary: Letzte Benachrichtigungen (D4)
+      description: |
+        Ereignisse: ORDER_PENDING_APPROVAL, ORDER_REJECTED, DELIVERY_ERRORS, RECONCILE_BLOCKED,
+        DQ_EXCEPTIONS, DAILY_RUN_FAILED. Versand per Webhook (Teams-Karte oder JSON) nach dem Commit.
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 100 } }
+      responses:
+        '200':
+          description: Meldungen, neueste zuerst
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: { type: string }
+                    createdAt: { type: string, format: date-time }
+                    event: { type: string }
+                    title: { type: string }
+                    text: { type: string }
+                    status: { type: string, enum: [PENDING, SENT, STORED, FAILED] }
+                    error: { type: string }
+
   /audit:
     get:
       tags: [Governance]
@@ -387,11 +508,17 @@ components:
     OrderRequest:
       type: object
       required: [type, instruments]
+      description: |
+        SUBSCRIBE bestellt mit Feldlisten, UNSUBSCRIBE bestellt zum Monatsende ab, BACKFILL lädt
+        Historie (C2) für Instrumente im Universum; abgerechnet über die Kategorie History.
       properties:
-        type: { type: string, enum: [SUBSCRIBE, UNSUBSCRIBE] }
+        type: { type: string, enum: [SUBSCRIBE, UNSUBSCRIBE, BACKFILL] }
         instruments: { type: array, minItems: 1, items: { $ref: '#/components/schemas/Identifier' } }
         fieldSets: { type: array, items: { type: string }, description: Nur bei SUBSCRIBE }
         reason: { type: string }
+        fields: { type: array, items: { type: string }, description: Nur bei BACKFILL }
+        from: { type: string, format: date, description: Nur bei BACKFILL }
+        to: { type: string, format: date, description: Nur bei BACKFILL, höchstens heute }
     OrderStatus:
       type: string
       enum: [DRAFT, PENDING_APPROVAL, APPROVED, REJECTED, SUBMITTED, COMPLETED, FAILED]
@@ -409,6 +536,7 @@ components:
             approvedBy: { type: string }
             approvedAt: { type: string, format: date-time }
             decisionComment: { type: string }
+            source: { type: string, enum: [MANUAL, XENTIS] }
             effectiveDate: { type: string, format: date }
     CostEstimate:
       type: object
@@ -459,19 +587,11 @@ components:
               date: { type: string, format: date }
               value: { type: [number, string, 'null'] }
               recordedAt: { type: string, format: date-time, description: Zeitpunkt, zu dem der Wert bekannt wurde }
-    BackfillRequest:
-      type: object
-      required: [instrumentIds, fields, from, to]
-      properties:
-        instrumentIds: { type: array, items: { type: string } }
-        fields: { type: array, items: { type: string } }
-        from: { type: string, format: date }
-        to: { type: string, format: date }
     Job:
       type: object
       properties:
         id: { type: string }
-        kind: { type: string, enum: [BACKFILL, RECONCILE, DELIVERY] }
+        kind: { type: string, enum: [RECONCILE, DELIVERY] }
         status: { type: string, enum: [QUEUED, RUNNING, SUCCEEDED, FAILED] }
         startedAt: { type: string, format: date-time }
         finishedAt: { type: string, format: date-time }
@@ -483,6 +603,12 @@ components:
         description: { type: string }
         category: { type: string }
         pricePerInstrument: { type: number }
+        entitlement:
+          type: [object, 'null']
+          properties:
+            requiredRole: { type: string }
+            redistributable: { type: boolean }
+            allowed: { type: boolean, description: Darf der aufrufende Benutzer lesen }
     FieldSet:
       type: object
       properties:
@@ -491,6 +617,40 @@ components:
         description: { type: string }
         fields: { type: array, items: { type: string } }
         categories: { type: array, items: { type: string } }
+    ReconcileResult:
+      type: object
+      properties:
+        jobId: { type: string }
+        asOf: { type: string, format: date }
+        dryRun: { type: boolean }
+        held: { type: integer, description: Gehaltene ISINs am Stichtag }
+        subscribe: { type: integer }
+        unsubscribe: { type: integer }
+        unsubscribeBlocked:
+          type: boolean
+          description: Sicherung gegen unvollständige Dateien hat Abbestellungen verhindert
+        notes: { type: array, items: { type: string } }
+        orders:
+          type: object
+          additionalProperties:
+            type: object
+            properties: { id: { type: string }, status: { $ref: '#/components/schemas/OrderStatus' } }
+        proposals:
+          type: array
+          items:
+            type: object
+            properties:
+              isin: { type: string }
+              action: { type: string, enum: [SUBSCRIBE, UNSUBSCRIBE] }
+              reason: { type: string }
+    Entitlement:
+      type: object
+      required: [category]
+      properties:
+        category: { type: string }
+        requiredRole: { type: [string, 'null'], description: 'Entra-App-Rolle zum Lesen, z. B. daten.esg' }
+        redistributable: { type: boolean, default: true, description: false sperrt den CSV-Export }
+        note: { type: string }
     DataQualityException:
       type: object
       properties:
@@ -499,7 +659,10 @@ components:
         instrumentId: { type: string }
         field: { type: string }
         date: { type: string, format: date }
+        detail: { type: string, example: '100 -> 130 (+30.0%)' }
         status: { type: string, enum: [OPEN, ACKNOWLEDGED, RESOLVED] }
+        detectedAt: { type: string, format: date-time }
+        handledBy: { type: string }
     AuditEntry:
       type: object
       properties:
@@ -508,7 +671,7 @@ components:
         action: { type: string, example: ORDER_APPROVED }
         entity: { type: string }
         entityId: { type: string }
-        details: { type: object, additionalProperties: true }
+        details: { description: Objekt oder Liste, je nach Aktion }
     Error:
       type: object
       properties:

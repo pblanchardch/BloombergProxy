@@ -167,6 +167,8 @@ def test_pricing_update_keeps_history(client):
     current = {p["category"]: p["pricePerInstrument"] for p in
                client.get("/api/v1/pricing/categories", headers=ALICE).json()}
     assert current["Pricing"] == "2.00"
+    changed = [a for a in client.get("/api/v1/audit", headers=ALICE).json() if a["action"] == "PRICING_CHANGED"]
+    assert changed[0]["details"][0]["category"] == "Pricing"
     # Oktober wird weiterhin mit dem alten Preis gerechnet.
     subscribe(client, isins(1))
     assert client.get("/api/v1/usage?month=2026-10", headers=ALICE).json()[0]["cost"] == "1.50"

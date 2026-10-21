@@ -110,11 +110,11 @@ async function loadUniverse() {
   if ($("u-status").value) q.set("status", $("u-status").value);
   const page = await api(`/instruments?${q}`);
   $("u-rows").innerHTML = page.items.map((i) => `<tr>
-    <td>${ids(i)}${i.name ? `<br><span class="hint">${esc(i.name)}</span>` : ""}</td><td>${esc(i.status)}</td><td>${esc(i.fieldSets.join(", "))}</td>
+    <td>${ids(i)}${i.name ? `<br><span class="hint">${esc(i.name)}</span>` : ""}</td><td>${esc(i.status)}</td><td>${esc(i.source)}</td><td>${esc(i.fieldSets.join(", "))}</td>
     <td>${esc(i.categories.join(", "))}</td><td>${esc(i.subscribedSince)}</td><td>${esc(i.unsubscribeEffective)}</td>
     <td><button data-ts="${esc(i.id)}" data-label="${esc(i.name || i.identifiers[0]?.value)}">Zeitreihe</button>
       ${i.status === "ACTIVE" ? `<button data-unsub='${esc(JSON.stringify(i.identifiers[0]))}'>Abbestellen</button>` : ""}</td>
-  </tr>`).join("") || `<tr><td colspan="7" class="hint">Keine Instrumente</td></tr>`;
+  </tr>`).join("") || `<tr><td colspan="8" class="hint">Keine Instrumente</td></tr>`;
 }
 $("universe-filter").addEventListener("submit", (e) => { e.preventDefault(); guard(loadUniverse); });
 $("u-rows").addEventListener("click", (e) => {
@@ -159,6 +159,28 @@ $("run-delivery").addEventListener("click", () => guard(async () => {
   await loadUniverse();
 }));
 
+// Xentis-Abgleich (B1)
+$("x-import").addEventListener("click", () => guard(async () => {
+  const file = $("x-file").files[0];
+  if (!file) throw new Error("Bitte eine Positionsdatei wählen");
+  const r = await api(`/positions/import?fileName=${encodeURIComponent(file.name)}`,
+    { method: "POST", body: await file.arrayBuffer(), headers: { "Content-Type": "text/csv" } });
+  $("x-result").innerHTML = `<p>${r.rows} Positionen per ${esc(r.asOfDates.join(", "))} importiert`
+    + `${r.skipped.length ? `, <span class="warn">${r.skipped.length} Zeilen übersprungen</span>` : ""}.</p>`;
+}));
+async function reconcile(dryRun) {
+  const r = await api("/universe/reconcile", { method: "POST", body: JSON.stringify({ dryRun }) });
+  const rows = r.proposals.map((p) => `<tr><td>${esc(p.isin)}</td><td>${esc(p.action === "SUBSCRIBE" ? "Bestellen" : "Abbestellen")}</td><td>${esc(p.reason)}</td></tr>`).join("");
+  const orders = Object.values(r.orders).map((o) => `${esc(o.status)}`).join(", ");
+  $("x-result").innerHTML = `<p>${dryRun ? "Testlauf" : "Abgleich"} mit Positionen per ${esc(r.asOf)}: `
+    + `${r.subscribe} bestellen, ${r.unsubscribe} abbestellen${orders ? ` · Bestellungen: ${orders}` : ""}.</p>`
+    + r.notes.map((n) => `<p class="bad">${esc(n)}</p>`).join("")
+    + (rows ? `<table><thead><tr><th>ISIN</th><th>Aktion</th><th>Grund</th></tr></thead><tbody>${rows}</tbody></table>` : "");
+  if (!dryRun) await loadUniverse();
+}
+$("x-dry").addEventListener("click", () => guard(() => reconcile(true)));
+$("x-run").addEventListener("click", () => guard(() => reconcile(false)));
+
 // Bestellen
 async function loadFieldSets() {
   const sets = await api("/field-sets");
@@ -175,11 +197,20 @@ function orderBody() {
     fieldSets: $("o-type").value === "SUBSCRIBE"
       ? [...document.querySelectorAll("#o-fieldsets input:checked")].map((c) => c.value) : [],
     reason: $("o-reason").value || null,
+    ...($("o-type").value === "BACKFILL" ? {
+      fields: $("o-fields").value.split(",").map((f) => f.trim()).filter(Boolean),
+      from: $("o-from").value || null,
+      to: $("o-to").value || null,
+    } : {}),
   };
 }
+$("o-type").addEventListener("change", () => {
+  $("o-fieldsets").hidden = $("o-type").value !== "SUBSCRIBE";
+  $("o-history").hidden = $("o-type").value !== "BACKFILL";
+});
 
 function renderEstimate(est, order) {
-  const rows = est.byCategory.map((c) => `<tr><td>${esc(c.category)}</td><td class="num">${c.newUniqueInstruments}</td><td class="num">${money(c.cost, est.currency)}</td></tr>`).join("");
+  const rows = est.byCategory.map((c) => `<tr><td>${esc(c.category)}</td><td class="num">${c.newUniqueInstruments}</td><td class="num">${est.unpricedCategories.includes(c.category) ? '<span class="warn">Preis fehlt</span>' : money(c.cost, est.currency)}</td></tr>`).join("");
   $("o-result").innerHTML = `<div class="card">
     ${order ? `<p><strong>Bestellung ${esc(order.status)}</strong>${order.requiresApproval ? ' <span class="warn">– wartet auf Freigabe</span>' : ""}</p>` : ""}
     <p>Mehrkosten diesen Monat: <strong>${money(est.additionalMonthlyCost, est.currency)}</strong></p>
@@ -227,10 +258,54 @@ async function loadCosts() {
   $("c-rows").innerHTML = rows.map((r) => `<tr><td>${esc(r.category)}</td><td class="num">${r.uniqueInstruments}</td>
     <td class="num">${r.cost == null ? '<span class="warn">Preis fehlt</span>' : money(r.cost, r.currency)}</td></tr>`).join("")
     || `<tr><td colspan="3" class="hint">Keine Nutzung in diesem Monat</td></tr>`;
+  // Nutzung eingeschränkter Kategorien (B4), nur für lizenz.admin sichtbar
+  try {
+    const usage = await api(`/entitlements/usage?month=${$("c-month").value}`);
+    $("c-usage").innerHTML = `<h3>Zugriffe auf eingeschränkte Daten</h3><table><thead><tr><th>Kategorie</th><th>Benutzer und Anwendungen</th><th>Zugriffe</th></tr></thead><tbody>`
+      + (usage.map((u) => `<tr><td>${esc(u.category)}</td><td>${esc(u.users.join(", "))}</td><td class="num">${u.accesses}</td></tr>`).join("")
+        || `<tr><td colspan="3" class="hint">Keine Zugriffe</td></tr>`) + `</tbody></table>`;
+  } catch { $("c-usage").innerHTML = ""; }
 }
 $("cost-form").addEventListener("submit", (e) => { e.preventDefault(); guard(loadCosts); });
 
-const refresh = { universe: () => guard(loadUniverse), approvals: () => guard(loadApprovals), costs: () => guard(loadCosts) };
+// Datenqualität (D1)
+const DQ_LABEL = { MISSING_VALUE: "Wert fehlt", STALE_PRICE: "Preis unverändert", OUTLIER: "Ausreisser" };
+let instrumentNames = {};
+async function loadQuality() {
+  const q = $("dq-status").value ? `?status=${$("dq-status").value}` : "";
+  const [rows, page] = await Promise.all([api(`/data-quality/exceptions${q}`), api("/instruments?pageSize=500")]);
+  instrumentNames = Object.fromEntries(page.items.map((i) => [i.id, i.name || i.identifiers[0]?.value]));
+  $("dq-rows").innerHTML = rows.map((x) => `<tr>
+    <td>${esc(x.date)}</td><td>${esc(DQ_LABEL[x.type] || x.type)}</td><td>${esc(instrumentNames[x.instrumentId] || x.instrumentId)}</td>
+    <td>${esc(x.field)}</td><td>${esc(x.detail)}</td><td>${esc(x.status)}${x.handledBy ? `<br><span class="hint">${esc(x.handledBy)}</span>` : ""}</td>
+    <td>${x.status === "OPEN" ? `<button data-dq="${esc(x.id)}" data-to="ACKNOWLEDGED">Übernehmen</button>` : ""}
+        ${x.status !== "RESOLVED" ? `<button data-dq="${esc(x.id)}" data-to="RESOLVED">Erledigt</button>` : ""}</td>
+  </tr>`).join("") || `<tr><td colspan="7" class="hint">Keine Ausnahmen</td></tr>`;
+}
+$("dq-form").addEventListener("submit", (e) => { e.preventDefault(); guard(loadQuality); });
+$("dq-rows").addEventListener("click", (e) => {
+  const { dq, to } = e.target.dataset || {};
+  if (!dq) return;
+  const comment = to === "RESOLVED" ? prompt("Kommentar (optional)") : null;
+  guard(async () => {
+    await api(`/data-quality/exceptions/${dq}/status`, { method: "POST", body: JSON.stringify({ status: to, comment }) });
+    await loadQuality();
+  });
+});
+
+// Meldungen (D4)
+const SENT_LABEL = { SENT: "versandt", STORED: "nur gespeichert", FAILED: "Versand fehlgeschlagen", PENDING: "ausstehend" };
+async function loadMessages() {
+  const rows = await api("/notifications");
+  $("m-rows").innerHTML = rows.map((n) => `<tr>
+    <td>${esc(new Date(n.createdAt + "Z").toLocaleString("de-CH"))}</td>
+    <td><strong>${esc(n.title)}</strong><br>${esc(n.text)}</td>
+    <td class="${n.status === "FAILED" ? "bad" : "hint"}">${esc(SENT_LABEL[n.status] || n.status)}${n.error ? `<br>${esc(n.error)}` : ""}</td>
+  </tr>`).join("") || `<tr><td colspan="3" class="hint">Keine Meldungen</td></tr>`;
+}
+
+const refresh = { universe: () => guard(loadUniverse), approvals: () => guard(loadApprovals), costs: () => guard(loadCosts),
+  quality: () => guard(loadQuality), messages: () => guard(loadMessages) };
 guard(async () => {
   if (await initAuth()) { refresh.universe(); await loadFieldSets(); }
 });
