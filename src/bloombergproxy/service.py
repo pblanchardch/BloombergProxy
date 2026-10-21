@@ -20,7 +20,7 @@ from collections.abc import Callable
 from datetime import date, datetime, timezone
 from decimal import Decimal
 
-from sqlalchemy import Connection, Engine, and_, delete, func, insert, or_, select, update
+from sqlalchemy import Connection, Engine, and_, case, delete, func, insert, or_, select, update
 
 from . import db
 from .bloomberg import BloombergClient, Delivery, UniverseChange, bbg_identifier, parse_identifier
@@ -212,7 +212,8 @@ class LicenseService:
 
     # -------------------------------------------------------------- Bestellungen
 
-    def create_order(self, req: OrderRequest, user: str, idempotency_key: str | None = None) -> Order:
+    def create_order(self, req: OrderRequest, user: str, idempotency_key: str | None = None,
+                     source: str = "MANUAL") -> Order:
         with self.engine.begin() as conn:
             if idempotency_key:
                 o = db.order.c
@@ -239,6 +240,7 @@ class LicenseService:
                 estimated_cost_chf=estimate.additional_monthly_cost,
                 estimate_json=estimate.model_dump_json(by_alias=True),
                 requires_approval=requires_approval,
+                source=source,
                 requested_by=user,
                 requested_at=self.clock(),
                 idempotency_key=idempotency_key,
@@ -308,7 +310,7 @@ class LicenseService:
             if instrument_id is None:
                 instrument_id = str(uuid.uuid4())
                 conn.execute(insert(db.instrument).values(
-                    instrument_id=instrument_id, status=InstrumentStatus.ACTIVE, source="MANUAL",
+                    instrument_id=instrument_id, status=InstrumentStatus.ACTIVE, source=row["source"],
                     subscribed_since=today, created_at=now, updated_at=now,
                     **{IDENTIFIER_COLUMNS[item["identifier_type"]]: item["identifier_value"]},
                 ))
@@ -319,6 +321,9 @@ class LicenseService:
                 # Eine erneute Bestellung hebt eine vorgemerkte Abbestellung auf.
                 conn.execute(update(db.instrument).where(db.instrument.c.instrument_id == instrument_id).values(
                     status=InstrumentStatus.ACTIVE, unsubscribe_effective=None, updated_at=now,
+                    # Ein reaktiviertes Instrument gehört der Quelle, die es neu bestellt hat.
+                    source=case((db.instrument.c.status == InstrumentStatus.INACTIVE, row["source"]),
+                                else_=db.instrument.c.source),
                     subscribed_since=func.coalesce(db.instrument.c.subscribed_since, today)))
             for fs in set(field_sets) - self._instrument_field_sets(conn, instrument_id):
                 conn.execute(insert(db.instrument_field_set).values(
@@ -516,6 +521,7 @@ class LicenseService:
             approved_at=row["decided_at"] if row["status"] != OrderStatus.REJECTED else None,
             decision_comment=row["decision_comment"],
             effective_date=row["effective_date"],
+            source=row["source"],
         )
 
     def get_order(self, order_id: str) -> Order:

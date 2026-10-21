@@ -236,13 +236,46 @@ paths:
             application/json:
               schema: { type: array, items: { $ref: '#/components/schemas/FieldSet' } }
 
+  /positions/import:
+    post:
+      tags: [Universum]
+      summary: Xentis-Positionsdatei importieren (B1)
+      description: |
+        CSV mit Stichtag, Portfolio, ISIN und Bestand (Spaltennamen und Trennzeichen konfigurierbar).
+        Eine erneute Lieferung für denselben Stichtag ersetzt die frühere. Rolle lizenz.admin.
+      parameters:
+        - { name: fileName, in: query, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          text/csv: { schema: { type: string } }
+      responses:
+        '200':
+          description: Import-Ergebnis
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  asOfDates: { type: array, items: { type: string, format: date } }
+                  rows: { type: integer }
+                  skipped:
+                    type: array
+                    items: { type: object, properties: { line: { type: integer }, reason: { type: string } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
   /universe/reconcile:
     post:
       tags: [Universum]
       summary: Abgleich mit den Xentis-Positionen starten (B1)
       description: |
-        Läuft automatisch einmal täglich nach der Xentis-Lieferung. Neue Positionen erzeugen
-        Bestellungen, geschlossene Positionen werden zur Abbestellung zum Monatsende vorgemerkt.
+        Läuft im Tageslauf automatisch. Gehaltene ISINs ausserhalb des Universums werden mit den
+        Standard-Feldlisten bestellt (Kostenprognose, ab 200 CHF Freigabe durch eine Person).
+        Vom Abgleich bestellte Instrumente, die nicht mehr gehalten werden, werden zum Monatsende
+        abbestellt. Manuell bestellte Instrumente bleiben unberührt. Würde mehr als der
+        konfigurierte Anteil (Standard 20 %) abbestellt, unterbleiben die Abbestellungen.
+        Rolle lizenz.admin.
       requestBody:
         content:
           application/json:
@@ -251,7 +284,12 @@ paths:
               properties:
                 dryRun: { type: boolean, default: true, description: Nur Vorschlag, keine Bestellungen }
       responses:
-        '202': { description: Gestartet, content: { application/json: { schema: { $ref: '#/components/schemas/Job' } } } }
+        '202':
+          description: Ergebnis des Abgleichs
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReconcileResult' }
+        '400': { $ref: '#/components/responses/BadRequest' }
 
   /deliveries/run:
     post:
@@ -409,6 +447,7 @@ components:
             approvedBy: { type: string }
             approvedAt: { type: string, format: date-time }
             decisionComment: { type: string }
+            source: { type: string, enum: [MANUAL, XENTIS] }
             effectiveDate: { type: string, format: date }
     CostEstimate:
       type: object
@@ -491,6 +530,32 @@ components:
         description: { type: string }
         fields: { type: array, items: { type: string } }
         categories: { type: array, items: { type: string } }
+    ReconcileResult:
+      type: object
+      properties:
+        jobId: { type: string }
+        asOf: { type: string, format: date }
+        dryRun: { type: boolean }
+        held: { type: integer, description: Gehaltene ISINs am Stichtag }
+        subscribe: { type: integer }
+        unsubscribe: { type: integer }
+        unsubscribeBlocked:
+          type: boolean
+          description: Sicherung gegen unvollständige Dateien hat Abbestellungen verhindert
+        notes: { type: array, items: { type: string } }
+        orders:
+          type: object
+          additionalProperties:
+            type: object
+            properties: { id: { type: string }, status: { $ref: '#/components/schemas/OrderStatus' } }
+        proposals:
+          type: array
+          items:
+            type: object
+            properties:
+              isin: { type: string }
+              action: { type: string, enum: [SUBSCRIBE, UNSUBSCRIBE] }
+              reason: { type: string }
     DataQualityException:
       type: object
       properties:

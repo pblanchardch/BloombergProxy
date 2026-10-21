@@ -87,6 +87,7 @@ order = Table(
     Column("estimated_cost_chf", Numeric(12, 2)),
     Column("estimate_json", String),
     Column("requires_approval", Boolean, nullable=False),
+    Column("source", String, nullable=False, default="MANUAL"),
     Column("requested_by", String, nullable=False),
     Column("requested_at", DateTime, nullable=False),
     Column("decided_by", String),
@@ -148,6 +149,37 @@ billing_instrument_month = Table(
     Column("category", String, primary_key=True),
     Column("first_requested_at", DateTime, nullable=False),
     schema="gold",
+)
+
+position = Table(
+    "position", metadata,
+    Column("as_of_date", Date, nullable=False),
+    Column("portfolio", String, nullable=False),
+    Column("isin", String),
+    Column("instrument_id", String),
+    Column("quantity", Numeric(28, 6)),
+    schema="silver",
+)
+
+xentis_positions_raw = Table(
+    "xentis_positions_raw", metadata,
+    Column("delivery_date", Date, nullable=False),
+    Column("file_name", String, nullable=False),
+    Column("received_at", DateTime, nullable=False),
+    Column("line_no", Integer, nullable=False),
+    Column("payload", String, nullable=False),
+    schema="bronze",
+)
+
+reconcile_proposal = Table(
+    "reconcile_proposal", metadata,
+    Column("job_id", String, nullable=False),
+    Column("instrument_id", String),
+    Column("isin", String),
+    Column("action", String, nullable=False),
+    Column("reason", String),
+    Column("order_id", String),
+    schema="app",
 )
 
 timeseries_value = Table(

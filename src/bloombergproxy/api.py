@@ -6,6 +6,7 @@ from datetime import date, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
+from pydantic import BaseModel
 
 from .auth import AuthError, EntraVerifier, User
 from .config import Settings
@@ -26,6 +27,7 @@ from .models import (
     TimeSeries,
     UsageEntry,
 )
+from .reconcile import Reconciler, daily_run
 from .service import LicenseService
 
 router = APIRouter(prefix="/api/v1")
@@ -74,7 +76,12 @@ def service(request: Request) -> LicenseService:
     return request.app.state.service
 
 
+def reconciler(request: Request) -> Reconciler:
+    return request.app.state.reconciler
+
+
 Svc = Annotated[LicenseService, Depends(service)]
+Rec = Annotated[Reconciler, Depends(reconciler)]
 Reader = Annotated[User, Depends(require("lizenz.read"))]
 Orderer = Annotated[User, Depends(require("lizenz.order"))]
 Approver = Annotated[User, Depends(require("lizenz.approve"))]
@@ -168,9 +175,35 @@ def fields(svc: Svc, _: Reader, search: str | None = None, category: str | None 
 
 
 @router.post("/deliveries/run")
-def run_delivery(svc: Svc, user: Admin):
-    """Tageslauf auslösen (im Betrieb zeitgesteuert): Abbestellungen, offene Antworten, Tageslieferung."""
-    return svc.run_daily_delivery(user.name)
+def run_delivery(rec: Rec, user: Admin):
+    """Tageslauf auslösen (im Betrieb zeitgesteuert): Xentis-Abgleich, Abbestellungen, Lieferungen."""
+    return daily_run(rec, user.name)
+
+
+@router.post("/positions/import")
+async def import_positions(request: Request, rec: Rec, user: Admin,
+                           file_name: Annotated[str, Query(alias="fileName")] = "upload.csv"):
+    """Xentis-Positionsdatei (CSV) importieren."""
+    raw = await request.body()
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        text = raw.decode("cp1252")
+    return rec.import_positions(text, file_name, user.name)
+
+
+class ReconcileRequest(BaseModel):
+    dryRun: bool = True
+
+
+@router.post("/universe/reconcile", status_code=202)
+def reconcile(rec: Rec, user: Admin, body: ReconcileRequest | None = None):
+    return rec.reconcile(dry_run=body.dryRun if body else True, user=user.name)
+
+
+@router.get("/jobs/{job_id}")
+def get_job(job_id: str, rec: Rec, _: Reader):
+    return rec.get_job(job_id)
 
 
 @router.get("/field-sets", response_model=list[FieldSet])

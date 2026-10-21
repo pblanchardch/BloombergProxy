@@ -103,6 +103,7 @@ CREATE TABLE IF NOT EXISTS app.`order` (
   estimated_cost_chf DECIMAL(12,2) COMMENT 'Mehrkosten im laufenden Monat',
   estimate_json      STRING        COMMENT 'Kostenprognose zum Zeitpunkt der Bestellung (JSON)',
   requires_approval  BOOLEAN       NOT NULL COMMENT 'true ab 200 CHF',
+  source             STRING        NOT NULL COMMENT 'MANUAL oder XENTIS (automatischer Abgleich)',
   requested_by       STRING        NOT NULL,
   requested_at       TIMESTAMP     NOT NULL,
   decided_by         STRING        COMMENT 'Muss sich von requested_by unterscheiden',
@@ -114,6 +115,7 @@ CREATE TABLE IF NOT EXISTS app.`order` (
   CONSTRAINT pk_order PRIMARY KEY (order_id),
   CONSTRAINT ck_order_type   CHECK (order_type IN ('SUBSCRIBE','UNSUBSCRIBE')),
   CONSTRAINT ck_order_status CHECK (status IN ('DRAFT','PENDING_APPROVAL','APPROVED','REJECTED','SUBMITTED','COMPLETED','FAILED')),
+  CONSTRAINT ck_order_source CHECK (source IN ('MANUAL','XENTIS')),
   CONSTRAINT ck_order_4eyes  CHECK (decided_by IS NULL OR decided_by <> requested_by)
 ) COMMENT 'Bestellungen und Abbestellungen mit 4-Augen-Freigabe';
 

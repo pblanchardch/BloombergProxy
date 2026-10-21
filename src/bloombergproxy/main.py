@@ -11,6 +11,7 @@ from .auth import EntraVerifier
 from .bloomberg import BloombergClient, MockBloombergClient
 from .config import Settings
 from .db import make_engine
+from .reconcile import Reconciler
 from .service import Conflict, Forbidden, Invalid, LicenseService, NotFound
 
 STATIC = Path(__file__).parent / "static"
@@ -31,6 +32,7 @@ def create_app(settings: Settings | None = None, bloomberg: BloombergClient | No
         raise ValueError(f"Unbekannter auth_mode: {settings.auth_mode}")
     app.state.service = service or LicenseService(
         make_engine(settings.database_url), bloomberg or MockBloombergClient(), settings)
+    app.state.reconciler = Reconciler(app.state.service)
     app.include_router(router)
 
     for exc, code in ((NotFound, 404), (Conflict, 409), (Forbidden, 403), (Invalid, 400)):

@@ -48,6 +48,28 @@ Lokal läuft der Service mit SQLite. Für Databricks `BBGPROXY_DATABASE_URL` auf
 - Zeitreihen bitemporal mit Stichtagsabfrage, JSON oder CSV (B-06, C1)
 - Feldkatalog, Feldlisten, Prüfpfad (D2, D3)
 - Anmeldung über Microsoft Entra ID
+- Phase 2: Universum folgt den Xentis-Positionen (B1)
+
+## Universum folgt den Xentis-Positionen (B1)
+
+Xentis liefert einmal pro Tag eine Positionsdatei. Import über `POST /api/v1/positions/import`
+(CSV, Rolle `lizenz.admin`) oder im Frontend; der Abgleich läuft im Tageslauf automatisch
+(`BBGPROXY_XENTIS_AUTO_RECONCILE`) oder über `POST /api/v1/universe/reconcile` mit `dryRun`.
+
+- Gehaltene ISINs ausserhalb des Universums werden mit `BBGPROXY_XENTIS_FIELD_SETS`
+  (Standard `["PRICING_EOD"]`) bestellt – über den normalen Weg mit Kostenprognose und
+  Freigabe ab 200 CHF durch eine Person.
+- Vom Abgleich bestellte Instrumente (Quelle `XENTIS`), die nicht mehr gehalten werden, werden
+  zum Monatsende abbestellt. Wird eine Position im selben Monat wieder eröffnet, kostet das nichts.
+- Manuell bestellte Instrumente fasst der Abgleich nie an.
+- Sicherung: Würde mehr als `BBGPROXY_XENTIS_MAX_UNSUBSCRIBE_SHARE` (Standard 20 %) der
+  Xentis-Instrumente abbestellt, unterbleiben die Abbestellungen und der Lauf wird als
+  fehlgeschlagen gemeldet – meist ist dann die Datei unvollständig.
+
+**Annahme zum Dateiformat** (bitte mit dem tatsächlichen Xentis-Export abgleichen): CSV mit
+Semikolon, Kopfzeile `Stichtag;Portfolio;ISIN;Bestand`, Datum `TT.MM.JJJJ` oder ISO, Bestand
+in Schweizer Schreibweise (`1'250.50`). Trennzeichen und Spaltennamen sind über
+`BBGPROXY_XENTIS_*` einstellbar. Zeilen ohne ISIN (z. B. Konten, OTC) werden übersprungen.
 
 ## Bloomberg-Mock
 
@@ -92,4 +114,5 @@ Die API prüft Signatur, Aussteller, Audience und Ablauf; Berechtigungen kommen 
 - **Bloomberg-Adapter** für die Data License REST API (ersetzt den Mock).
 - **Databricks:** Der Service ist bisher nur mit SQLite getestet.
 - **Preise:** Die Vertragswerte fehlen noch; Pflege über `PUT /pricing/categories`.
-- **Phase 2:** Xentis-Abgleich (`/universe/reconcile`), Backfills, Datenqualität, Benachrichtigungen.
+- **Xentis-Dateiformat** bestätigen (siehe oben).
+- **Phase 2, weiter:** Backfills (C2), Datenqualität (D1), Benachrichtigungen (D4), Nutzungsrechte (B4).

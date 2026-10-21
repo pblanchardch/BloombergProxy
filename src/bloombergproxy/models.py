@@ -97,6 +97,7 @@ class Order(OrderRequest):
     approved_at: datetime | None = None
     decision_comment: str | None = None
     effective_date: date | None = None
+    source: str = "MANUAL"
 
 
 class OrderPage(ApiModel):

@@ -36,6 +36,16 @@
       <button>Suchen</button>
       <button type="button" id="run-delivery" title="Benötigt lizenz.admin; im Betrieb zeitgesteuert">Tageslauf ausführen</button>
     </form>
+    <details class="card">
+      <summary>Xentis-Abgleich (Rolle lizenz.admin)</summary>
+      <form id="x-form" class="row">
+        <label>Positionsdatei (CSV) <input id="x-file" type="file" accept=".csv,text/csv"></label>
+        <button type="button" id="x-import">Importieren</button>
+        <button type="button" id="x-dry">Abgleich testen</button>
+        <button type="button" id="x-run">Abgleich ausführen</button>
+      </form>
+      <div id="x-result"></div>
+    </details>
     <div id="series" class="card" hidden>
       <div class="row"><strong id="ts-title"></strong><button type="button" id="ts-close">Schliessen</button></div>
       <form id="ts-form" class="row">
@@ -48,7 +58,7 @@
       <table><thead><tr><th>Datum</th><th>Wert</th><th>Bekannt seit</th></tr></thead><tbody id="ts-rows"></tbody></table>
     </div>
     <table>
-      <thead><tr><th>Identifier</th><th>Status</th><th>Feldlisten</th><th>Kategorien</th><th>Seit</th><th>Abbestellt per</th><th></th></tr></thead>
+      <thead><tr><th>Identifier</th><th>Status</th><th>Quelle</th><th>Feldlisten</th><th>Kategorien</th><th>Seit</th><th>Abbestellt per</th><th></th></tr></thead>
       <tbody id="u-rows"></tbody>
     </table>
   </section>

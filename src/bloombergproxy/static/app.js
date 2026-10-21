@@ -110,11 +110,11 @@ async function loadUniverse() {
   if ($("u-status").value) q.set("status", $("u-status").value);
   const page = await api(`/instruments?${q}`);
   $("u-rows").innerHTML = page.items.map((i) => `<tr>
-    <td>${ids(i)}${i.name ? `<br><span class="hint">${esc(i.name)}</span>` : ""}</td><td>${esc(i.status)}</td><td>${esc(i.fieldSets.join(", "))}</td>
+    <td>${ids(i)}${i.name ? `<br><span class="hint">${esc(i.name)}</span>` : ""}</td><td>${esc(i.status)}</td><td>${esc(i.source)}</td><td>${esc(i.fieldSets.join(", "))}</td>
     <td>${esc(i.categories.join(", "))}</td><td>${esc(i.subscribedSince)}</td><td>${esc(i.unsubscribeEffective)}</td>
     <td><button data-ts="${esc(i.id)}" data-label="${esc(i.name || i.identifiers[0]?.value)}">Zeitreihe</button>
       ${i.status === "ACTIVE" ? `<button data-unsub='${esc(JSON.stringify(i.identifiers[0]))}'>Abbestellen</button>` : ""}</td>
-  </tr>`).join("") || `<tr><td colspan="7" class="hint">Keine Instrumente</td></tr>`;
+  </tr>`).join("") || `<tr><td colspan="8" class="hint">Keine Instrumente</td></tr>`;
 }
 $("universe-filter").addEventListener("submit", (e) => { e.preventDefault(); guard(loadUniverse); });
 $("u-rows").addEventListener("click", (e) => {
@@ -158,6 +158,28 @@ $("run-delivery").addEventListener("click", () => guard(async () => {
     + `${r.values ?? 0} neue Werte, ${r.corrections ?? 0} Korrekturen, ${r.removed.length} abbestellt`);
   await loadUniverse();
 }));
+
+// Xentis-Abgleich (B1)
+$("x-import").addEventListener("click", () => guard(async () => {
+  const file = $("x-file").files[0];
+  if (!file) throw new Error("Bitte eine Positionsdatei wählen");
+  const r = await api(`/positions/import?fileName=${encodeURIComponent(file.name)}`,
+    { method: "POST", body: await file.arrayBuffer(), headers: { "Content-Type": "text/csv" } });
+  $("x-result").innerHTML = `<p>${r.rows} Positionen per ${esc(r.asOfDates.join(", "))} importiert`
+    + `${r.skipped.length ? `, <span class="warn">${r.skipped.length} Zeilen übersprungen</span>` : ""}.</p>`;
+}));
+async function reconcile(dryRun) {
+  const r = await api("/universe/reconcile", { method: "POST", body: JSON.stringify({ dryRun }) });
+  const rows = r.proposals.map((p) => `<tr><td>${esc(p.isin)}</td><td>${esc(p.action === "SUBSCRIBE" ? "Bestellen" : "Abbestellen")}</td><td>${esc(p.reason)}</td></tr>`).join("");
+  const orders = Object.values(r.orders).map((o) => `${esc(o.status)}`).join(", ");
+  $("x-result").innerHTML = `<p>${dryRun ? "Testlauf" : "Abgleich"} mit Positionen per ${esc(r.asOf)}: `
+    + `${r.subscribe} bestellen, ${r.unsubscribe} abbestellen${orders ? ` · Bestellungen: ${orders}` : ""}.</p>`
+    + r.notes.map((n) => `<p class="bad">${esc(n)}</p>`).join("")
+    + (rows ? `<table><thead><tr><th>ISIN</th><th>Aktion</th><th>Grund</th></tr></thead><tbody>${rows}</tbody></table>` : "");
+  if (!dryRun) await loadUniverse();
+}
+$("x-dry").addEventListener("click", () => guard(() => reconcile(true)));
+$("x-run").addEventListener("click", () => guard(() => reconcile(false)));
 
 // Bestellen
 async function loadFieldSets() {

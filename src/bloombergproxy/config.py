@@ -13,6 +13,20 @@ class Settings(BaseSettings):
     approval_threshold: Decimal = Decimal("200")
     currency: str = "CHF"
 
+    # Xentis-Positionsdatei (CSV). Spaltennamen an den tatsächlichen Export anpassen.
+    xentis_delimiter: str = ";"
+    xentis_col_date: str = "Stichtag"
+    xentis_col_portfolio: str = "Portfolio"
+    xentis_col_isin: str = "ISIN"
+    xentis_col_quantity: str = "Bestand"
+    # Feldlisten, mit denen der Abgleich neue Positionen bestellt (B1).
+    xentis_field_sets: list[str] = ["PRICING_EOD"]
+    # Abgleich im Tageslauf ausführen; sonst nur über POST /universe/reconcile.
+    xentis_auto_reconcile: bool = True
+    # Sicherung gegen unvollständige Dateien: Würde der Abgleich mehr als diesen Anteil der
+    # Xentis-Instrumente abbestellen, bestellt er nichts ab und meldet das.
+    xentis_max_unsubscribe_share: float = 0.2
+
     # "entra": Bearer-Token von Microsoft Entra ID (Standard, Betrieb).
     # "header": Benutzer und Scopes aus X-User / X-Scopes (nur Entwicklung, ohne Prüfung).
     auth_mode: str = "entra"
