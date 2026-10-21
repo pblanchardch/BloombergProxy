@@ -185,6 +185,21 @@ reconcile_proposal = Table(
     schema="app",
 )
 
+dq_exception = Table(
+    "dq_exception", metadata,
+    Column("exception_id", String, primary_key=True),
+    Column("type", String, nullable=False),
+    Column("instrument_id", String, nullable=False),
+    Column("field", String, nullable=False),
+    Column("value_date", Date, nullable=False),
+    Column("detail", String),
+    Column("detected_at", DateTime, nullable=False),
+    Column("status", String, nullable=False),
+    Column("handled_by", String),
+    Column("handled_at", DateTime),
+    schema="gold",
+)
+
 timeseries_value = Table(
     "timeseries_value", metadata,
     Column("instrument_id", String, nullable=False),

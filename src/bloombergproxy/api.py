@@ -27,7 +27,9 @@ from .models import (
     TimeSeries,
     UsageEntry,
 )
-from .reconcile import Reconciler, daily_run
+from .jobs import daily_run
+from .quality import DataQuality, DqException, StatusChange
+from .reconcile import Reconciler
 from .service import LicenseService
 
 router = APIRouter(prefix="/api/v1")
@@ -81,7 +83,12 @@ def reconciler(request: Request) -> Reconciler:
 
 
 Svc = Annotated[LicenseService, Depends(service)]
+def quality(request: Request) -> DataQuality:
+    return request.app.state.quality
+
+
 Rec = Annotated[Reconciler, Depends(reconciler)]
+Dq = Annotated[DataQuality, Depends(quality)]
 Reader = Annotated[User, Depends(require("lizenz.read"))]
 Orderer = Annotated[User, Depends(require("lizenz.order"))]
 Approver = Annotated[User, Depends(require("lizenz.approve"))]
@@ -175,9 +182,19 @@ def fields(svc: Svc, _: Reader, search: str | None = None, category: str | None 
 
 
 @router.post("/deliveries/run")
-def run_delivery(rec: Rec, user: Admin):
-    """Tageslauf auslösen (im Betrieb zeitgesteuert): Xentis-Abgleich, Abbestellungen, Lieferungen."""
-    return daily_run(rec, user.name)
+def run_delivery(rec: Rec, dq: Dq, user: Admin):
+    """Tageslauf auslösen (im Betrieb zeitgesteuert): Xentis-Abgleich, Lieferungen, Datenqualität."""
+    return daily_run(rec, dq, user.name)
+
+
+@router.get("/data-quality/exceptions", response_model=list[DqException])
+def dq_exceptions(dq: Dq, _: Reader, type: str | None = None, status: str | None = None):
+    return dq.list(type, status)
+
+
+@router.post("/data-quality/exceptions/{exception_id}/status", response_model=DqException)
+def dq_status(exception_id: str, change: StatusChange, dq: Dq, user: Orderer):
+    return dq.set_status(exception_id, change, user.name)
 
 
 @router.post("/positions/import")

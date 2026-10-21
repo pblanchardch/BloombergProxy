@@ -325,7 +325,10 @@ paths:
   /data-quality/exceptions:
     get:
       tags: [Governance]
-      summary: Offene Datenqualitäts-Ausnahmen (D1)
+      summary: Datenqualitäts-Ausnahmen (D1)
+      description: |
+        Nach jeder Tageslieferung geprüft: fehlende Werte, seit mehreren Liefertagen unveränderter
+        PX_LAST (Standard 3), Veränderung von PX_LAST zum Vortag über 20 %.
       parameters:
         - { name: type, in: query, schema: { type: string, enum: [STALE_PRICE, OUTLIER, MISSING_VALUE] } }
         - { name: status, in: query, schema: { type: string, enum: [OPEN, ACKNOWLEDGED, RESOLVED] } }
@@ -335,6 +338,27 @@ paths:
           content:
             application/json:
               schema: { type: array, items: { $ref: '#/components/schemas/DataQualityException' } }
+  /data-quality/exceptions/{exceptionId}/status:
+    post:
+      tags: [Governance]
+      summary: Ausnahme übernehmen oder erledigen (D1)
+      parameters:
+        - { name: exceptionId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { type: string, enum: [OPEN, ACKNOWLEDGED, RESOLVED] }
+                comment: { type: string }
+      responses:
+        '200': { description: Ausnahme, content: { application/json: { schema: { $ref: '#/components/schemas/DataQualityException' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   /audit:
     get:
       tags: [Governance]
@@ -550,7 +574,10 @@ components:
         instrumentId: { type: string }
         field: { type: string }
         date: { type: string, format: date }
+        detail: { type: string, example: '100 -> 130 (+30.0%)' }
         status: { type: string, enum: [OPEN, ACKNOWLEDGED, RESOLVED] }
+        detectedAt: { type: string, format: date-time }
+        handledBy: { type: string }
     AuditEntry:
       type: object
       properties:

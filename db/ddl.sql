@@ -270,9 +270,11 @@ CREATE TABLE IF NOT EXISTS gold.dq_exception (
   instrument_id STRING    NOT NULL,
   field         STRING    NOT NULL,
   value_date    DATE      NOT NULL,
+  detail        STRING    COMMENT 'z. B. Veränderung in Prozent',
   detected_at   TIMESTAMP NOT NULL,
   status        STRING    NOT NULL,
   handled_by    STRING,
+  handled_at    TIMESTAMP,
   CONSTRAINT pk_dq_exception PRIMARY KEY (exception_id),
   CONSTRAINT ck_dq_type   CHECK (type IN ('STALE_PRICE','OUTLIER','MISSING_VALUE')),
   CONSTRAINT ck_dq_status CHECK (status IN ('OPEN','ACKNOWLEDGED','RESOLVED'))

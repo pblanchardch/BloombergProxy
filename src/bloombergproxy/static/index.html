@@ -23,6 +23,7 @@
   <button data-tab="order">Bestellen</button>
   <button data-tab="approvals">Freigaben</button>
   <button data-tab="costs">Kosten</button>
+  <button data-tab="quality">Datenqualität</button>
 </nav>
 
 <main>
@@ -100,6 +101,16 @@
     <table>
       <thead><tr><th>Kategorie</th><th>Eindeutige Instrumente</th><th>Kosten</th></tr></thead>
       <tbody id="c-rows"></tbody>
+    </table>
+  </section>
+  <section id="quality" hidden>
+    <form id="dq-form" class="row">
+      <select id="dq-status"><option value="OPEN">Offen</option><option value="ACKNOWLEDGED">In Bearbeitung</option><option value="RESOLVED">Erledigt</option><option value="">Alle</option></select>
+      <button>Anzeigen</button>
+    </form>
+    <table>
+      <thead><tr><th>Datum</th><th>Art</th><th>Instrument</th><th>Feld</th><th>Detail</th><th>Status</th><th></th></tr></thead>
+      <tbody id="dq-rows"></tbody>
     </table>
   </section>
 </main>

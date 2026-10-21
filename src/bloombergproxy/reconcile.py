@@ -179,13 +179,3 @@ class Reconciler:
                                     "orderId": x["order_id"]} for x in proposals]
         return result
 
-
-def daily_run(reconciler: Reconciler, user: str) -> dict:
-    """Tageslauf: Abgleich mit Xentis (falls eingeschaltet), danach Lieferungen (C3)."""
-    result = {}
-    if reconciler.settings.xentis_auto_reconcile:
-        try:
-            result["reconcile"] = reconciler.reconcile(dry_run=False, user=SYSTEM_USER)
-        except Invalid as e:
-            result["reconcile"] = {"skipped": str(e)}
-    return reconciler.svc.run_daily_delivery(user) | result

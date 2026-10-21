@@ -18,6 +18,10 @@ class Settings(BaseSettings):
     history_category: str = "History"
     backfill_max_days: int = 3650
 
+    # Datenqualität (D1)
+    dq_stale_days: int = 3          # PX_LAST so viele Liefertage unverändert -> STALE_PRICE
+    dq_outlier_share: float = 0.2   # Veränderung zum Vortag über 20 % -> OUTLIER
+
     # Xentis-Positionsdatei (CSV). Spaltennamen an den tatsächlichen Export anpassen.
     xentis_delimiter: str = ";"
     xentis_col_date: str = "Stichtag"

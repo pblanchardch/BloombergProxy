@@ -261,7 +261,33 @@ async function loadCosts() {
 }
 $("cost-form").addEventListener("submit", (e) => { e.preventDefault(); guard(loadCosts); });
 
-const refresh = { universe: () => guard(loadUniverse), approvals: () => guard(loadApprovals), costs: () => guard(loadCosts) };
+// Datenqualität (D1)
+const DQ_LABEL = { MISSING_VALUE: "Wert fehlt", STALE_PRICE: "Preis unverändert", OUTLIER: "Ausreisser" };
+let instrumentNames = {};
+async function loadQuality() {
+  const q = $("dq-status").value ? `?status=${$("dq-status").value}` : "";
+  const [rows, page] = await Promise.all([api(`/data-quality/exceptions${q}`), api("/instruments?pageSize=500")]);
+  instrumentNames = Object.fromEntries(page.items.map((i) => [i.id, i.name || i.identifiers[0]?.value]));
+  $("dq-rows").innerHTML = rows.map((x) => `<tr>
+    <td>${esc(x.date)}</td><td>${esc(DQ_LABEL[x.type] || x.type)}</td><td>${esc(instrumentNames[x.instrumentId] || x.instrumentId)}</td>
+    <td>${esc(x.field)}</td><td>${esc(x.detail)}</td><td>${esc(x.status)}${x.handledBy ? `<br><span class="hint">${esc(x.handledBy)}</span>` : ""}</td>
+    <td>${x.status === "OPEN" ? `<button data-dq="${esc(x.id)}" data-to="ACKNOWLEDGED">Übernehmen</button>` : ""}
+        ${x.status !== "RESOLVED" ? `<button data-dq="${esc(x.id)}" data-to="RESOLVED">Erledigt</button>` : ""}</td>
+  </tr>`).join("") || `<tr><td colspan="7" class="hint">Keine Ausnahmen</td></tr>`;
+}
+$("dq-form").addEventListener("submit", (e) => { e.preventDefault(); guard(loadQuality); });
+$("dq-rows").addEventListener("click", (e) => {
+  const { dq, to } = e.target.dataset || {};
+  if (!dq) return;
+  const comment = to === "RESOLVED" ? prompt("Kommentar (optional)") : null;
+  guard(async () => {
+    await api(`/data-quality/exceptions/${dq}/status`, { method: "POST", body: JSON.stringify({ status: to, comment }) });
+    await loadQuality();
+  });
+});
+
+const refresh = { universe: () => guard(loadUniverse), approvals: () => guard(loadApprovals), costs: () => guard(loadCosts),
+  quality: () => guard(loadQuality) };
 guard(async () => {
   if (await initAuth()) { refresh.universe(); await loadFieldSets(); }
 });
