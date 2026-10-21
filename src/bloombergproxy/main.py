@@ -11,10 +11,13 @@ from .api import router
 from .auth import EntraVerifier
 from .bloomberg import BloombergClient, MockBloombergClient
 from .config import Settings
+from .corporate_actions import CorporateActions
 from .db import make_engine
 from .entitlements import Entitlements
+from .esg import Esg
 from .quality import DataQuality
 from .reconcile import Reconciler
+from .vendors import VendorImport
 from .service import Conflict, Forbidden, Invalid, LicenseService, NotFound
 
 STATIC = Path(__file__).parent / "static"
@@ -34,10 +37,13 @@ def create_app(settings: Settings | None = None, bloomberg: BloombergClient | No
     else:
         raise ValueError(f"Unbekannter auth_mode: {settings.auth_mode}")
     app.state.service = service or LicenseService(
-        make_engine(settings.database_url), bloomberg or MockBloombergClient(), settings)
+        make_engine(settings.database_url), bloomberg or MockBloombergClient(state_dir=settings.bloomberg_mock_state_dir or None), settings)
     app.state.reconciler = Reconciler(app.state.service)
     app.state.quality = DataQuality(app.state.service)
     app.state.entitlements = Entitlements(app.state.service)
+    app.state.vendors = VendorImport(app.state.service)
+    app.state.corporate_actions = CorporateActions(app.state.service)
+    app.state.esg = Esg(app.state.service)
     app.include_router(router)
 
     @app.middleware("http")

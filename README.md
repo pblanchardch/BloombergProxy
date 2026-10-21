@@ -21,6 +21,24 @@ Anforderungskatalog: https://claude.ai/artifact/9GJaqQp9dmCtVSZANLy5cL
 - Zielplattform Databricks (Bronze, Silver, Gold)
 - 4-Augen-Freigabe ab 200 CHF Mehrkosten pro Bestellung
 
+## Mit Docker starten
+
+```bash
+docker compose up --build
+```
+
+Dann http://localhost:8000 öffnen (API-Dokumentation unter `/docs`). Oben als Benutzer z. B.
+`admin` mit den Scopes `lizenz.read,lizenz.order,lizenz.approve,lizenz.admin` eintragen.
+
+Die Compose-Datei startet eine Demo: Entwicklungsmodus ohne Entra ID, Bloomberg-Mock,
+Beispiel-Feldlisten mit Platzhalterpreisen, SQLite im Volume `daten` (bleibt über Neustarts
+erhalten). Den Tageslauf, der im Betrieb zeitgesteuert läuft, lösen Sie im Frontend aus oder mit
+`docker compose exec bloombergproxy bloombergproxy-job daily`. Zurücksetzen:
+`docker compose down -v`.
+
+Für den Betrieb das Image ohne `BBGPROXY_AUTH_MODE=header` und `BBGPROXY_DEMO_SEED` starten und
+die Entra- und Datenbank-Einstellungen setzen (siehe unten).
+
 ## Lokal starten
 
 ```bash
@@ -85,12 +103,65 @@ Semikolon, Kopfzeile `Stichtag;Portfolio;ISIN;Bestand`, Datum `TT.MM.JJJJ` oder 
 in Schweizer Schreibweise (`1'250.50`). Trennzeichen und Spaltennamen sind über
 `BBGPROXY_XENTIS_*` einstellbar. Zeilen ohne ISIN (z. B. Konten, OTC) werden übersprungen.
 
+## Stammdaten und mehrere Anbieter (A1, A4)
+
+- Bloomberg-Stammdatenfelder (z. B. Feldliste `REFERENCE`) befüllen Emittent, Instrument und
+  Listing (`silver.issuer`, `silver.security`, `silver.listing`) und die Zuordnung aller
+  Kennungen (`silver.identifier_xref`). Ein Instrument wird so unter jeder bekannten Kennung
+  gefunden – eine per ISIN bestellte Aktie gilt auch bei einer Bestellung per FIGI als Duplikat.
+- Daten anderer Anbieter per CSV: `POST /api/v1/vendors/{anbieter}/xref`
+  (`Kennungstyp;Kennung;ISIN`, ordnet Anbieter-Kennungen zu) und
+  `POST /api/v1/vendors/{anbieter}/values` (`Kennungstyp;Kennung;Datum;Feld;Wert`).
+- Golden Copy: Zeitreihen ohne `source` liefern je Tag den Wert der Quelle mit dem höchsten
+  Rang (`BBGPROXY_SOURCE_PRECEDENCE`, Standard `["BLOOMBERG"]`, übrige Anbieter alphabetisch).
+- Datenqualität: `SOURCE_MISMATCH`, wenn Quellen beim Preis um mehr als 2 % abweichen
+  (`BBGPROXY_DQ_SOURCE_TOLERANCE`); `ID_CONFLICT`, wenn eine Kennung zwei Instrumenten
+  zugeordnet würde (die Zuordnung bleibt dann unverändert).
+
+## Corporate Actions (A2)
+
+- Bloomberg-Ereignisse kommen im Tageslauf (Ex-Datum 7 Tage zurück bis 90 Tage voraus), andere
+  Anbieter per CSV (`POST /api/v1/vendors/{anbieter}/corporate-actions`).
+- Jede Meldung wird je Quelle bitemporal gespeichert (`silver.corporate_action`).
+- Golden Copy (`GET /api/v1/corporate-actions`): Meldungen zum selben Instrument, derselben Art
+  und demselben Ex-Datum bilden ein Ereignis; massgebend ist die ranghöchste Quelle. Abweichende
+  Beträge, Verhältnisse, Zahltage oder Status ergeben die Ausnahme `CA_MISMATCH`.
+- Ein Split am Ex-Tag erklärt den Preissprung: dann keine `OUTLIER`-Ausnahme.
+- Neue oder geänderte Splits und annullierte Ereignisse werden gemeldet.
+
+## ESG mehrerer Anbieter (A3)
+
+- `ESG_SCORE` von Bloomberg (Feldliste `ESG`) und anderen Anbietern (Werte-Import, z. B.
+  `ISIN;CH…;21.10.2026;ESG_SCORE;AA`).
+- `GET /api/v1/esg` rechnet jeden Score auf 0–100 um (höher = besser) und zeigt Durchschnitt und
+  Abweichung; über `BBGPROXY_ESG_DIVERGENCE` (Standard 25 Punkte) gilt ein Instrument als
+  abweichend. Skalen je Quelle in `BBGPROXY_ESG_SCALES` – **Annahmen**: Bloomberg 0–10,
+  MSCI CCC…AAA, Sustainalytics Risiko 0–50 (niedriger = besser); mit den Verträgen abgleichen.
+- Die Nutzungsrechte der Kategorie `ESG` gelten auch hier.
+
+## Betrieb auf Databricks (C4)
+
+- Datenmodell: `db/ddl.sql` im Katalog `bbg_license` ausführen. Der Service spricht Databricks
+  über ein SQL Warehouse an: `BBGPROXY_DATABASE_URL=databricks://token:<token>@<host>?http_path=<pfad>&catalog=bbg_license`
+  und `pip install -e ".[databricks]"`.
+- Zeitgesteuerte Läufe über die Kommandozeile `bloombergproxy-job`:
+  - `bloombergproxy-job import-positions <verzeichnis>` importiert neue Xentis-Dateien
+    (bereits importierte Dateinamen werden übersprungen), z. B. aus einem Unity-Catalog-Volume;
+  - `bloombergproxy-job daily` führt den Tageslauf aus (Xentis-Abgleich, Lieferungen,
+    Corporate Actions, Datenqualität, Meldungen).
+- `databricks.yml` (Asset Bundle) richtet beides als Job ein: werktags 18:30 Zürcher Zeit,
+  Einzelknoten-Cluster, Zugangsdaten aus dem Secret-Scope `bloombergproxy`
+  (`database_url`, `notify_webhook_url`). `databricks bundle deploy -t prod`.
+- Solange der Mock aktiv ist, teilen Service und Job offene Anfragen über
+  `BBGPROXY_BLOOMBERG_MOCK_STATE_DIR` (z. B. ein Volume).
+
 ## Bloomberg-Mock
 
 Bis Zugangsdaten und Katalog-ID der Data License vorliegen, spricht der Service mit
 `MockBloombergClient` (`src/bloombergproxy/bloomberg.py`). Der Mock ruft Bloomberg nicht auf und
 
-- liefert deterministische Werte für `PX_LAST`, `PX_VOLUME`, `NAME`, `CRNCY`, `ESG_SCORE`,
+- liefert deterministische Werte für `PX_LAST`, `PX_VOLUME`, `NAME`, `CRNCY`, `ESG_SCORE` und die
+  Stammdatenfelder, dazu Quartalsdividenden (rund 70 % der Instrumente) und gelegentliche Splits,
 - meldet ISINs mit falscher Prüfziffer als `INVALID_SECURITY` (sie werden nicht abgerechnet),
 - korrigiert bei der Tageslieferung gelegentlich den Vortagespreis, damit Stichtagsabfragen
   etwas zu zeigen haben.
@@ -126,7 +197,8 @@ Die API prüft Signatur, Aussteller, Audience und Ablauf; Berechtigungen kommen 
 ## Offen
 
 - **Bloomberg-Adapter** für die Data License REST API (ersetzt den Mock).
-- **Databricks:** Der Service ist bisher nur mit SQLite getestet.
+- **Databricks:** Service, Job und Bundle sind bisher nur mit SQLite bzw. ohne Workspace geprüft;
+  `databricks bundle validate` und ein erster Lauf gegen einen Workspace stehen aus.
 - **Preise:** Die Vertragswerte fehlen noch; Pflege über `PUT /pricing/categories`.
 - **Xentis-Dateiformat** bestätigen (siehe oben).
 - **Teams-Webhook** einrichten (`BBGPROXY_NOTIFY_WEBHOOK_URL`).

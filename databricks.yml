@@ -1,0 +1,82 @@
+# Databricks Asset Bundle: Tageslauf als zeitgesteuerter Job (C4).
+#   databricks bundle validate -t dev
+#   databricks bundle deploy -t prod
+# Voraussetzungen: db/ddl.sql ausgeführt, Secret-Scope mit database_url (databricks://-URL eines
+# SQL Warehouse) und optional notify_webhook_url, Volumes für Xentis-Dateien und Mock-Zustand.
+bundle:
+  name: bloombergproxy
+
+variables:
+  secret_scope:
+    description: Secret-Scope mit database_url und notify_webhook_url
+    default: bloombergproxy
+  xentis_volume:
+    description: Volume, in das Xentis die Positionsdateien legt
+    default: /Volumes/bbg_license/bronze/xentis
+  mock_state_volume:
+    description: Volume für offene Anfragen des Bloomberg-Mocks (entfällt mit dem echten Adapter)
+    default: /Volumes/bbg_license/app/mock
+  node_type:
+    description: Knotentyp des Job-Clusters (Azure)
+    default: Standard_D4ds_v5
+
+artifacts:
+  default:
+    type: whl
+    build: python -m pip wheel --no-deps --wheel-dir dist .
+    path: .
+
+resources:
+  jobs:
+    tageslauf:
+      name: bloombergproxy-tageslauf
+      schedule:
+        # Werktags 18:30 Zürcher Zeit, nach Börsenschluss
+        quartz_cron_expression: "0 30 18 ? * MON-FRI"
+        timezone_id: Europe/Zurich
+      max_concurrent_runs: 1
+      job_clusters:
+        - job_cluster_key: einzelknoten
+          new_cluster:
+            spark_version: 15.4.x-scala2.12
+            node_type_id: ${var.node_type}
+            num_workers: 0
+            spark_conf:
+              spark.databricks.cluster.profile: singleNode
+              spark.master: "local[*]"
+            custom_tags:
+              ResourceClass: SingleNode
+            spark_env_vars:
+              BBGPROXY_DATABASE_URL: "{{secrets/${var.secret_scope}/database_url}}"
+              BBGPROXY_NOTIFY_WEBHOOK_URL: "{{secrets/${var.secret_scope}/notify_webhook_url}}"
+              BBGPROXY_BLOOMBERG_MOCK_STATE_DIR: ${var.mock_state_volume}
+      tasks:
+        - task_key: xentis_import
+          job_cluster_key: einzelknoten
+          python_wheel_task:
+            package_name: bloombergproxy
+            entry_point: bloombergproxy-job
+            parameters: ["import-positions", "${var.xentis_volume}"]
+          libraries:
+            - whl: ./dist/*.whl
+            - pypi:
+                package: databricks-sqlalchemy>=2.0
+        - task_key: tageslauf
+          depends_on:
+            - task_key: xentis_import
+          job_cluster_key: einzelknoten
+          python_wheel_task:
+            package_name: bloombergproxy
+            entry_point: bloombergproxy-job
+            parameters: ["daily"]
+          libraries:
+            - whl: ./dist/*.whl
+            - pypi:
+                package: databricks-sqlalchemy>=2.0
+
+targets:
+  dev:
+    mode: development
+    default: true
+  prod:
+    mode: production

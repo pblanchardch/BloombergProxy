@@ -27,11 +27,14 @@ from .models import (
     TimeSeries,
     UsageEntry,
 )
+from .corporate_actions import CorporateActions, GoldenAction
+from .esg import Esg, EsgSummary
 from .entitlements import Entitlement, Entitlements, UsageByCategory
 from .jobs import daily_run
 from .quality import DataQuality, DqException, StatusChange
 from .reconcile import Reconciler
 from .service import LicenseService
+from .vendors import VendorImport
 
 router = APIRouter(prefix="/api/v1")
 
@@ -94,6 +97,27 @@ def entitlements(request: Request) -> Entitlements:
 
 Rec = Annotated[Reconciler, Depends(reconciler)]
 Ent = Annotated[Entitlements, Depends(entitlements)]
+
+
+def vendor_import(request: Request) -> VendorImport:
+    return request.app.state.vendors
+
+
+Vend = Annotated[VendorImport, Depends(vendor_import)]
+
+
+def corporate_actions_dep(request: Request) -> CorporateActions:
+    return request.app.state.corporate_actions
+
+
+Ca = Annotated[CorporateActions, Depends(corporate_actions_dep)]
+
+
+def esg_dep(request: Request) -> Esg:
+    return request.app.state.esg
+
+
+EsgDep = Annotated[Esg, Depends(esg_dep)]
 Dq = Annotated[DataQuality, Depends(quality)]
 Reader = Annotated[User, Depends(require("lizenz.read"))]
 Orderer = Annotated[User, Depends(require("lizenz.order"))]
@@ -170,17 +194,46 @@ def timeseries(svc: Svc, ent: Ent, user: Reader,
                start: Annotated[date, Query(alias="from")],
                end: Annotated[date, Query(alias="to")],
                as_of: Annotated[datetime | None, Query(alias="asOf")] = None,
+               source: str | None = None,
                format: str = "json"):
     ent.check_read(user, instrument_id, field, export=format == "csv")
-    ts = svc.timeseries(instrument_id, field, start, end, as_of)
+    ts = svc.timeseries(instrument_id, field, start, end, as_of, source)
     if format != "csv":
         return ts
     out = io.StringIO()
     writer = csv.writer(out)
-    writer.writerow(["date", "value", "recordedAt"])
+    writer.writerow(["date", "value", "recordedAt", "source"])
     for p in ts.points:
-        writer.writerow([p.date.isoformat(), p.value, p.recorded_at.isoformat()])
+        writer.writerow([p.date.isoformat(), p.value, p.recorded_at.isoformat(), p.source])
     return Response(out.getvalue(), media_type="text/csv")
+
+
+@router.get("/instruments/{instrument_id}/sources")
+def instrument_sources(instrument_id: str, svc: Svc, _: Reader):
+    """Quellen mit Werten zu einem Instrument, nach Rang der Golden Copy."""
+    return svc.sources(instrument_id)
+
+
+async def _csv_body(request: Request) -> str:
+    raw = await request.body()
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return raw.decode("cp1252")
+
+
+@router.post("/vendors/{vendor}/xref")
+async def vendor_xref(vendor: str, request: Request, vi: Vend, user: Admin,
+                      file_name: Annotated[str, Query(alias="fileName")] = "upload.csv"):
+    """Anbieter-Kennungen über die ISIN zuordnen (CSV: Kennungstyp;Kennung;ISIN)."""
+    return vi.import_xref(vendor, await _csv_body(request), file_name, user.name)
+
+
+@router.post("/vendors/{vendor}/values")
+async def vendor_values(vendor: str, request: Request, vi: Vend, user: Admin,
+                        file_name: Annotated[str, Query(alias="fileName")] = "upload.csv"):
+    """Werte eines Anbieters importieren (CSV: Kennungstyp;Kennung;Datum;Feld;Wert)."""
+    return vi.import_values(vendor, await _csv_body(request), file_name, user.name)
 
 
 @router.get("/fields", response_model=list[FieldInfo])
@@ -206,9 +259,33 @@ def entitlement_usage(ent: Ent, _: Admin, month: Annotated[str, Query(pattern=r"
 
 
 @router.post("/deliveries/run")
-def run_delivery(rec: Rec, dq: Dq, user: Admin):
+def run_delivery(rec: Rec, dq: Dq, ca: Ca, user: Admin):
     """Tageslauf auslösen (im Betrieb zeitgesteuert): Xentis-Abgleich, Lieferungen, Datenqualität."""
-    return daily_run(rec, dq, user.name)
+    return daily_run(rec, dq, user.name, ca)
+
+
+@router.get("/esg", response_model=list[EsgSummary])
+def esg(es: EsgDep, ent: Ent, user: Reader,
+        instrument_id: Annotated[str | None, Query(alias="instrumentId")] = None):
+    """ESG-Scores aller Quellen, auf 0–100 umgerechnet, mit Durchschnitt und Abweichung (A3)."""
+    ent.check_read(user, instrument_id or "*", "ESG_SCORE", export=False)
+    return es.summary([instrument_id] if instrument_id else None)
+
+
+@router.get("/corporate-actions", response_model=list[GoldenAction])
+def corporate_actions(ca: Ca, _: Reader, instrument_id: Annotated[str | None, Query(alias="instrumentId")] = None,
+                      start: Annotated[date | None, Query(alias="from")] = None,
+                      end: Annotated[date | None, Query(alias="to")] = None, source: str | None = None):
+    """Golden Copy der Corporate Actions (A2); mit ``source`` nur die Meldungen dieser Quelle."""
+    return ca.query(instrument_id, start, end, source)
+
+
+@router.post("/vendors/{vendor}/corporate-actions")
+async def vendor_corporate_actions(vendor: str, request: Request, ca: Ca, user: Admin,
+                                   file_name: Annotated[str, Query(alias="fileName")] = "upload.csv"):
+    """Corporate Actions eines Anbieters (CSV: Kennungstyp;Kennung;EreignisId;Art;Status;ExDatum;
+    Zahltag;Betrag;Waehrung;Verhaeltnis)."""
+    return ca.import_csv(vendor, await _csv_body(request), file_name, user.name)
 
 
 @router.get("/data-quality/exceptions", response_model=list[DqException])

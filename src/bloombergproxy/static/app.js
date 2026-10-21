@@ -138,15 +138,18 @@ async function openSeries(id, label) {
   $("ts-from").value ||= start.toISOString().slice(0, 10);
   $("ts-to").value ||= end.toISOString().slice(0, 10);
   $("series").hidden = false;
+  const sources = await api(`/instruments/${id}/sources`);
+  $("ts-source").innerHTML = `<option value="">Golden Copy</option>` + sources.map((s) => `<option>${esc(s)}</option>`).join("");
   await loadSeries();
 }
 async function loadSeries() {
   const q = new URLSearchParams({ instrumentId: seriesId, field: $("ts-field").value, from: $("ts-from").value, to: $("ts-to").value });
   if ($("ts-asof").value) q.set("asOf", new Date($("ts-asof").value).toISOString().slice(0, 19));
+  if ($("ts-source").value) q.set("source", $("ts-source").value);
   const ts = await api(`/timeseries?${q}`);
   $("ts-rows").innerHTML = ts.points.slice().reverse().map((p) => `<tr><td>${esc(p.date)}</td>
-    <td class="num">${esc(num(p.value))}</td><td class="hint">${esc(new Date(p.recordedAt + "Z").toLocaleString("de-CH"))}</td></tr>`).join("")
-    || `<tr><td colspan="3" class="hint">Keine Werte im Zeitraum</td></tr>`;
+    <td class="num">${esc(num(p.value))}</td><td>${esc(p.source)}</td><td class="hint">${esc(new Date(p.recordedAt + "Z").toLocaleString("de-CH"))}</td></tr>`).join("")
+    || `<tr><td colspan="4" class="hint">Keine Werte im Zeitraum</td></tr>`;
 }
 $("ts-form").addEventListener("submit", (e) => { e.preventDefault(); guard(loadSeries); });
 $("ts-close").addEventListener("click", () => ($("series").hidden = true));
@@ -180,6 +183,21 @@ async function reconcile(dryRun) {
 }
 $("x-dry").addEventListener("click", () => guard(() => reconcile(true)));
 $("x-run").addEventListener("click", () => guard(() => reconcile(false)));
+
+// Daten anderer Anbieter (A4)
+$("v-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  guard(async () => {
+    const file = $("v-file").files[0];
+    if (!file) throw new Error("Bitte eine Datei wählen");
+    const r = await api(`/vendors/${encodeURIComponent($("v-name").value)}/${$("v-kind").value}?fileName=${encodeURIComponent(file.name)}`,
+      { method: "POST", body: await file.arrayBuffer(), headers: { "Content-Type": "text/csv" } });
+    $("v-result").innerHTML = `<p>${esc(r.vendor)}: ${r.mapped ?? r.values ?? r.new} übernommen`
+      + `${r.corrections || r.changed ? `, ${r.corrections || r.changed} Korrekturen` : ""}`
+      + `${r.mismatches ? `, <span class="warn">${r.mismatches} Abweichungen</span>` : ""}`
+      + `${r.skipped.length ? `, <span class="warn">${r.skipped.length} Zeilen übersprungen (${esc(r.skipped.slice(0, 3).map((s) => `Zeile ${s.line}: ${s.reason}`).join("; "))})</span>` : ""}.</p>`;
+  });
+});
 
 // Bestellen
 async function loadFieldSets() {
@@ -269,7 +287,8 @@ async function loadCosts() {
 $("cost-form").addEventListener("submit", (e) => { e.preventDefault(); guard(loadCosts); });
 
 // Datenqualität (D1)
-const DQ_LABEL = { MISSING_VALUE: "Wert fehlt", STALE_PRICE: "Preis unverändert", OUTLIER: "Ausreisser" };
+const DQ_LABEL = { MISSING_VALUE: "Wert fehlt", STALE_PRICE: "Preis unverändert", OUTLIER: "Ausreisser",
+  SOURCE_MISMATCH: "Quellen weichen ab", ID_CONFLICT: "Kennung doppelt", CA_MISMATCH: "Corporate Action weicht ab" };
 let instrumentNames = {};
 async function loadQuality() {
   const q = $("dq-status").value ? `?status=${$("dq-status").value}` : "";
@@ -293,6 +312,38 @@ $("dq-rows").addEventListener("click", (e) => {
   });
 });
 
+// Corporate Actions (A2)
+const CA_LABEL = { DVD_CASH: "Dividende", STOCK_SPLIT: "Split", RIGHTS_ISSUE: "Bezugsrecht", MERGER: "Fusion",
+  NAME_CHANGE: "Namensänderung", OTHER: "Andere" };
+const CA_STATUS = { ANNOUNCED: "angekündigt", CONFIRMED: "bestätigt", CANCELLED: "annulliert" };
+async function loadActions() {
+  const today = new Date();
+  $("ca-from").value ||= new Date(today - 30 * 864e5).toISOString().slice(0, 10);
+  $("ca-to").value ||= new Date(+today + 90 * 864e5).toISOString().slice(0, 10);
+  const [rows, page] = await Promise.all([
+    api(`/corporate-actions?from=${$("ca-from").value}&to=${$("ca-to").value}`), api("/instruments?pageSize=500")]);
+  const names = Object.fromEntries(page.items.map((i) => [i.id, i.name || i.identifiers[0]?.value]));
+  $("ca-rows").innerHTML = rows.map((a) => `<tr>
+    <td>${esc(a.exDate)}</td><td>${esc(names[a.instrumentId] || a.instrumentId)}</td>
+    <td>${esc(CA_LABEL[a.actionType] || a.actionType)}</td><td>${esc(CA_STATUS[a.status] || a.status)}</td>
+    <td class="num">${a.ratio ? `${esc(num(a.ratio))}:1` : a.amount ? `${esc(num(a.amount))} ${esc(a.currency || "")}` : "–"}</td>
+    <td>${esc(a.payDate || "–")}</td>
+    <td>${esc(a.sources.join(", "))}${a.mismatch.length ? `<br><span class="warn">Abweichung: ${esc(a.mismatch.join(", "))}</span>` : ""}</td>
+  </tr>`).join("") || `<tr><td colspan="7" class="hint">Keine Ereignisse im Zeitraum</td></tr>`;
+}
+$("ca-form").addEventListener("submit", (e) => { e.preventDefault(); guard(loadActions); });
+
+// ESG (A3)
+async function loadEsg() {
+  const rows = await api("/esg");
+  $("esg-rows").innerHTML = rows.map((r) => `<tr>
+    <td>${esc(r.name || r.instrumentId)}</td>
+    <td>${r.scores.map((s) => `${esc(s.source)}: ${esc(s.raw)} → ${s.normalized ?? "<span class='hint'>keine Skala</span>"}`).join("<br>")}</td>
+    <td class="num">${r.average ?? "–"}</td>
+    <td class="num ${r.divergent ? "warn" : ""}">${r.spread ?? "–"}${r.divergent ? " ⚠" : ""}</td>
+  </tr>`).join("") || `<tr><td colspan="4" class="hint">Keine ESG-Daten</td></tr>`;
+}
+
 // Meldungen (D4)
 const SENT_LABEL = { SENT: "versandt", STORED: "nur gespeichert", FAILED: "Versand fehlgeschlagen", PENDING: "ausstehend" };
 async function loadMessages() {
@@ -305,7 +356,7 @@ async function loadMessages() {
 }
 
 const refresh = { universe: () => guard(loadUniverse), approvals: () => guard(loadApprovals), costs: () => guard(loadCosts),
-  quality: () => guard(loadQuality), messages: () => guard(loadMessages) };
+  quality: () => guard(loadQuality), messages: () => guard(loadMessages), actions: () => guard(loadActions), esg: () => guard(loadEsg) };
 guard(async () => {
   if (await initAuth()) { refresh.universe(); await loadFieldSets(); }
 });

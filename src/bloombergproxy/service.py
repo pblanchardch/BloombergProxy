@@ -22,7 +22,7 @@ from decimal import Decimal
 
 from sqlalchemy import Connection, Engine, and_, case, delete, func, insert, or_, select, update
 
-from . import db
+from . import db, reference
 from .bloomberg import BloombergClient, Delivery, UniverseChange, bbg_identifier, parse_identifier
 from .config import Settings
 from .notify import Notifier
@@ -104,8 +104,12 @@ class LicenseService:
 
     @staticmethod
     def _resolve(conn: Connection, ident: Identifier):
-        column = db.instrument.c[IDENTIFIER_COLUMNS[ident.type]]
-        return conn.execute(select(db.instrument).where(column == ident.value)).mappings().first()
+        """Instrument zu einer Kennung, auch über die Zuordnungstabelle (A4)."""
+        instrument_id = reference.lookup(conn, ident.type, ident.value)
+        if instrument_id is None:
+            return None
+        return conn.execute(select(db.instrument).where(
+            db.instrument.c.instrument_id == instrument_id)).mappings().first()
 
     @staticmethod
     def _field_set_categories(conn: Connection, field_sets: list[str]) -> set[str]:
@@ -428,9 +432,28 @@ class LicenseService:
     # ---------------------------------------------------------- Lieferungen (C3)
 
     def _instrument_id(self, conn: Connection, identifier: str) -> str | None:
-        id_type, value = parse_identifier(identifier)
-        column = db.instrument.c[IDENTIFIER_COLUMNS[id_type]]
-        return conn.execute(select(db.instrument.c.instrument_id).where(column == value)).scalar()
+        return reference.lookup(conn, *parse_identifier(identifier))
+
+    def write_value(self, conn: Connection, instrument_id: str, field: str, value_date: date,
+                    value: Decimal | str | None, source: str, request_id: str) -> str | None:
+        """Schreibt einen Wert bitemporal: 'new', 'correction' oder None (unverändert)."""
+        t = db.timeseries_value.c
+        numeric = isinstance(value, Decimal)
+        key = (t.instrument_id == instrument_id, t.field == field, t.value_date == value_date,
+               t.source == source, t.superseded_at.is_(None))
+        current = conn.execute(select(t.value_num, t.value_str).where(*key)).first()
+        result = "new"
+        if current is not None:
+            old = current[0] if current[0] is not None else current[1]
+            if (Decimal(old) == value) if numeric and old is not None else (old == value):
+                return None
+            conn.execute(update(db.timeseries_value).where(*key).values(superseded_at=self.clock()))
+            result = "correction"
+        conn.execute(insert(db.timeseries_value).values(
+            instrument_id=instrument_id, field=field, value_date=value_date, source=source,
+            value_num=value if numeric else None, value_str=None if numeric else value,
+            recorded_at=self.clock(), superseded_at=None, bbg_request_id=request_id))
+        return result
 
     def _store(self, conn: Connection, delivery: Delivery) -> dict:
         """Schreibt die Rohdaten nach bronze und die Werte bitemporal nach silver."""
@@ -445,34 +468,29 @@ class LicenseService:
                 for n, line in enumerate(lines, start=1)
             ])
 
-        t = db.timeseries_value.c
         written = corrected = 0
         ids: dict[str, str | None] = {}
+        ref: dict[str, tuple[date, dict]] = {}  # Instrument -> (Stichtag, Stammdaten)
         for r in delivery.records:
             if r.identifier not in ids:
                 ids[r.identifier] = self._instrument_id(conn, r.identifier)
             instrument_id = ids[r.identifier]
             if instrument_id is None:
                 continue
-            numeric = isinstance(r.value, Decimal)
-            key = (t.instrument_id == instrument_id, t.field == r.field, t.value_date == r.value_date,
-                   t.superseded_at.is_(None))
-            current = conn.execute(select(t.value_num, t.value_str).where(*key)).first()
-            if current is not None:
-                old = current[0] if current[0] is not None else current[1]
-                if (Decimal(old) == r.value) if numeric and old is not None else (old == r.value):
-                    continue
-                conn.execute(update(db.timeseries_value).where(*key).values(superseded_at=now))
-                corrected += 1
-            conn.execute(insert(db.timeseries_value).values(
-                instrument_id=instrument_id, field=r.field, value_date=r.value_date,
-                value_num=r.value if numeric else None, value_str=None if numeric else r.value,
-                recorded_at=now, superseded_at=None, bbg_request_id=delivery.request_id))
-            written += 1
-            if r.field == "NAME" and r.value:
-                conn.execute(update(db.instrument).where(db.instrument.c.instrument_id == instrument_id)
-                             .values(name=r.value))
-        return {"values": written, "corrections": corrected}
+            result = self.write_value(conn, instrument_id, r.field, r.value_date, r.value, "BLOOMBERG",
+                                      delivery.request_id)
+            written += result is not None
+            corrected += result == "correction"
+            if r.field in reference.REFERENCE_FIELDS and r.value is not None:
+                day, values = ref.setdefault(instrument_id, (r.value_date, {}))
+                values[r.field] = r.value
+        conflicts = []
+        for instrument_id, (day, values) in ref.items():
+            conflicts += reference.apply(conn, instrument_id, values, "BLOOMBERG", day, now)
+        for c in conflicts:
+            self.notifier.add(conn, "ID_CONFLICT", "Kennung doppelt vergeben", c["detail"],
+                              {"instrumentId": c["instrument_id"]})
+        return {"values": written, "corrections": corrected, "idConflicts": len(conflicts)}
 
     def _drop_invalid(self, conn: Connection, errors: dict[str, str], user: str) -> list[str]:
         """Ungültige Instrumente werden nicht geliefert und daher auch nicht abgerechnet."""
@@ -718,22 +736,42 @@ class LicenseService:
                              categories=sorted(self._field_set_categories(conn, [r["field_set_id"]])))
                     for r in rows]
 
+    def source_rank(self, source: str) -> tuple[int, str]:
+        """Rang einer Quelle für die Golden Copy: zuerst die konfigurierte Reihenfolge, dann alphabetisch."""
+        order = self.settings.source_precedence
+        return (order.index(source) if source in order else len(order), source)
+
     def timeseries(self, instrument_id: str, field: str, start: date, end: date,
-                   as_of: datetime | None) -> TimeSeries:
+                   as_of: datetime | None, source: str | None = None) -> TimeSeries:
+        """Ohne ``source``: Golden Copy – je Tag der Wert der Quelle mit dem höchsten Rang."""
         t = db.timeseries_value.c
         conds = [t.instrument_id == instrument_id, t.field == field, t.value_date >= start, t.value_date <= end]
+        if source:
+            conds.append(t.source == source.upper())
         if as_of is None:
             conds.append(t.superseded_at.is_(None))
         else:
             conds += [t.recorded_at <= as_of, or_(t.superseded_at.is_(None), t.superseded_at > as_of)]
         with self.engine.connect() as conn:
             rows = conn.execute(select(db.timeseries_value).where(*conds).order_by(t.value_date)).mappings().all()
+        best: dict[date, dict] = {}
+        for r in rows:
+            if r["value_date"] not in best or self.source_rank(r["source"]) < self.source_rank(
+                    best[r["value_date"]]["source"]):
+                best[r["value_date"]] = r
         return TimeSeries(
-            instrument_id=instrument_id, field=field, as_of=as_of,
+            instrument_id=instrument_id, field=field, as_of=as_of, source=source.upper() if source else "GOLDEN",
             points=[TimeSeriesPoint(date=r["value_date"],
                                     value=r["value_num"] if r["value_num"] is not None else r["value_str"],
-                                    recorded_at=r["recorded_at"]) for r in rows],
+                                    recorded_at=r["recorded_at"], source=r["source"])
+                    for _, r in sorted(best.items())],
         )
+
+    def sources(self, instrument_id: str) -> list[str]:
+        t = db.timeseries_value.c
+        with self.engine.connect() as conn:
+            found = conn.execute(select(t.source).distinct().where(t.instrument_id == instrument_id)).scalars().all()
+        return sorted(found, key=self.source_rank)
 
     def audit(self, instrument_id: str | None, user: str | None, start: datetime | None,
               end: datetime | None) -> list[AuditEntry]:

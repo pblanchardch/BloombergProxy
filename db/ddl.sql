@@ -22,6 +22,15 @@ CREATE TABLE IF NOT EXISTS bronze.bbg_response_raw (
   payload         STRING    NOT NULL COMMENT 'Zeile bzw. JSON-Objekt wie geliefert'
 ) COMMENT 'Antwortdateien der Bloomberg Data License';
 
+CREATE TABLE IF NOT EXISTS bronze.vendor_file_raw (
+  vendor      STRING    NOT NULL,
+  kind        STRING    NOT NULL COMMENT 'xref, values, corporate-actions, esg',
+  file_name   STRING    NOT NULL,
+  received_at TIMESTAMP NOT NULL,
+  line_no     INT       NOT NULL,
+  payload     STRING    NOT NULL
+) COMMENT 'Dateien anderer Anbieter, unverändert (A4)';
+
 CREATE TABLE IF NOT EXISTS bronze.xentis_positions_raw (
   delivery_date   DATE      NOT NULL,
   file_name       STRING    NOT NULL,
@@ -233,7 +242,8 @@ CREATE TABLE IF NOT EXISTS silver.timeseries_value (
   value_str      STRING,
   recorded_at    TIMESTAMP NOT NULL COMMENT 'Ab wann der Wert bekannt war',
   superseded_at  TIMESTAMP COMMENT 'Ab wann ein korrigierter Wert galt; NULL = aktuell',
-  bbg_request_id STRING    NOT NULL COMMENT 'Herkunft (D2)',
+  bbg_request_id STRING    NOT NULL COMMENT 'Herkunft (D2): Request-ID bzw. Anbieterdatei',
+  source         STRING    NOT NULL DEFAULT 'BLOOMBERG' COMMENT 'Quelle (A4): BLOOMBERG oder Anbieter',
   CONSTRAINT fk_ts_instrument FOREIGN KEY (instrument_id) REFERENCES app.instrument
 ) CLUSTER BY (instrument_id, field, value_date)
   COMMENT 'Bitemporale Zeitreihen: Korrekturen werden angefügt, nie überschrieben (B-06, C1)';
@@ -241,16 +251,49 @@ CREATE TABLE IF NOT EXISTS silver.timeseries_value (
 -- Wissensstand zu einem Stichtag (C1)
 CREATE OR REPLACE FUNCTION silver.timeseries_as_of(as_of TIMESTAMP)
   RETURNS TABLE (instrument_id STRING, field STRING, value_date DATE,
-                 value_num DECIMAL(28,10), value_str STRING, recorded_at TIMESTAMP)
-  RETURN SELECT instrument_id, field, value_date, value_num, value_str, recorded_at
+                 value_num DECIMAL(28,10), value_str STRING, recorded_at TIMESTAMP, source STRING)
+  RETURN SELECT instrument_id, field, value_date, value_num, value_str, recorded_at, source
          FROM silver.timeseries_value
          WHERE recorded_at <= as_of
            AND (superseded_at IS NULL OR superseded_at > as_of);
 
 CREATE OR REPLACE VIEW silver.timeseries_current AS
-  SELECT instrument_id, field, value_date, value_num, value_str, recorded_at
+  SELECT instrument_id, field, value_date, value_num, value_str, recorded_at, source
   FROM silver.timeseries_value
   WHERE superseded_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS silver.corporate_action (
+  row_id        STRING        NOT NULL,
+  instrument_id STRING        NOT NULL,
+  source        STRING        NOT NULL COMMENT 'BLOOMBERG oder Anbieter',
+  event_key     STRING        NOT NULL COMMENT 'Kennung des Ereignisses bei der Quelle',
+  action_type   STRING        NOT NULL,
+  status        STRING        NOT NULL,
+  ex_date       DATE          NOT NULL,
+  pay_date      DATE,
+  amount        DECIMAL(18,6),
+  currency      STRING,
+  ratio         DECIMAL(18,6) COMMENT 'z. B. 2 für einen Split 2:1',
+  request_id    STRING,
+  recorded_at   TIMESTAMP     NOT NULL,
+  superseded_at TIMESTAMP     COMMENT 'NULL = aktueller Stand dieser Meldung',
+  CONSTRAINT pk_corporate_action PRIMARY KEY (row_id),
+  CONSTRAINT fk_ca_instrument FOREIGN KEY (instrument_id) REFERENCES app.instrument,
+  CONSTRAINT ck_ca_type   CHECK (action_type IN ('DVD_CASH','STOCK_SPLIT','RIGHTS_ISSUE','MERGER','NAME_CHANGE','OTHER')),
+  CONSTRAINT ck_ca_status CHECK (status IN ('ANNOUNCED','CONFIRMED','CANCELLED'))
+) CLUSTER BY (instrument_id, ex_date)
+  COMMENT 'Corporate Actions je Quelle, bitemporal (A2); Golden Copy über die Rangfolge der Quellen';
+
+CREATE TABLE IF NOT EXISTS silver.identifier_xref (
+  scheme        STRING    NOT NULL COMMENT 'ISIN, FIGI, CUSIP, SEDOL, TICKER oder Anbieter-Kennung (z. B. MSCI_ID)',
+  value         STRING    NOT NULL,
+  source        STRING    NOT NULL COMMENT 'Wer die Zuordnung geliefert hat',
+  instrument_id STRING    NOT NULL,
+  first_seen    TIMESTAMP,
+  last_seen     TIMESTAMP,
+  CONSTRAINT pk_identifier_xref PRIMARY KEY (scheme, value, source),
+  CONSTRAINT fk_xref_instrument FOREIGN KEY (instrument_id) REFERENCES app.instrument
+) COMMENT 'Zuordnung aller Kennungen zu Instrumenten (A4)';
 
 CREATE TABLE IF NOT EXISTS silver.position (
   as_of_date    DATE   NOT NULL,
@@ -298,6 +341,6 @@ CREATE TABLE IF NOT EXISTS gold.dq_exception (
   handled_by    STRING,
   handled_at    TIMESTAMP,
   CONSTRAINT pk_dq_exception PRIMARY KEY (exception_id),
-  CONSTRAINT ck_dq_type   CHECK (type IN ('STALE_PRICE','OUTLIER','MISSING_VALUE')),
+  CONSTRAINT ck_dq_type   CHECK (type IN ('STALE_PRICE','OUTLIER','MISSING_VALUE','SOURCE_MISMATCH','ID_CONFLICT','CA_MISMATCH')),
   CONSTRAINT ck_dq_status CHECK (status IN ('OPEN','ACKNOWLEDGED','RESOLVED'))
 ) COMMENT 'Datenqualitäts-Ausnahmen (D1)';

@@ -23,6 +23,8 @@
   <button data-tab="order">Bestellen</button>
   <button data-tab="approvals">Freigaben</button>
   <button data-tab="costs">Kosten</button>
+  <button data-tab="actions">Corporate Actions</button>
+  <button data-tab="esg">ESG</button>
   <button data-tab="quality">Datenqualität</button>
   <button data-tab="messages">Meldungen</button>
 </nav>
@@ -48,16 +50,27 @@
       </form>
       <div id="x-result"></div>
     </details>
+    <details class="card">
+      <summary>Daten anderer Anbieter (Rolle lizenz.admin)</summary>
+      <form id="v-form" class="row">
+        <label>Anbieter <input id="v-name" placeholder="z. B. MSCI" required></label>
+        <label>Art <select id="v-kind"><option value="values">Werte (Kennungstyp;Kennung;Datum;Feld;Wert)</option><option value="corporate-actions">Corporate Actions</option><option value="xref">Zuordnung (Kennungstyp;Kennung;ISIN)</option></select></label>
+        <label>Datei (CSV) <input id="v-file" type="file" accept=".csv,text/csv"></label>
+        <button>Importieren</button>
+      </form>
+      <div id="v-result"></div>
+    </details>
     <div id="series" class="card" hidden>
       <div class="row"><strong id="ts-title"></strong><button type="button" id="ts-close">Schliessen</button></div>
       <form id="ts-form" class="row">
-        <label>Feld <select id="ts-field"><option>PX_LAST</option><option>PX_VOLUME</option><option>NAME</option><option>CRNCY</option></select></label>
+        <label>Feld <select id="ts-field"><option>PX_LAST</option><option>PX_VOLUME</option><option>NAME</option><option>CRNCY</option><option>ESG_SCORE</option></select></label>
         <label>Von <input id="ts-from" type="date"></label>
         <label>Bis <input id="ts-to" type="date"></label>
         <label>Wissensstand per (optional) <input id="ts-asof" type="datetime-local"></label>
+        <label>Quelle <select id="ts-source"><option value="">Golden Copy</option></select></label>
         <button>Anzeigen</button>
       </form>
-      <table><thead><tr><th>Datum</th><th>Wert</th><th>Bekannt seit</th></tr></thead><tbody id="ts-rows"></tbody></table>
+      <table><thead><tr><th>Datum</th><th>Wert</th><th>Quelle</th><th>Bekannt seit</th></tr></thead><tbody id="ts-rows"></tbody></table>
     </div>
     <table>
       <thead><tr><th>Identifier</th><th>Status</th><th>Quelle</th><th>Feldlisten</th><th>Kategorien</th><th>Seit</th><th>Abbestellt per</th><th></th></tr></thead>
@@ -104,6 +117,24 @@
       <tbody id="c-rows"></tbody>
     </table>
     <div id="c-usage"></div>
+  </section>
+  <section id="actions" hidden>
+    <form id="ca-form" class="row">
+      <label>Ex-Datum von <input id="ca-from" type="date"></label>
+      <label>bis <input id="ca-to" type="date"></label>
+      <button>Anzeigen</button>
+    </form>
+    <table>
+      <thead><tr><th>Ex-Datum</th><th>Instrument</th><th>Art</th><th>Status</th><th>Betrag / Verhältnis</th><th>Zahltag</th><th>Quellen</th></tr></thead>
+      <tbody id="ca-rows"></tbody>
+    </table>
+  </section>
+  <section id="esg" hidden>
+    <p class="hint">Scores aller Quellen, umgerechnet auf 0–100 (höher = besser). Grosse Abweichungen zwischen Anbietern sind markiert.</p>
+    <table>
+      <thead><tr><th>Instrument</th><th>Quellen (Originalwert → 0–100)</th><th>Durchschnitt</th><th>Abweichung</th></tr></thead>
+      <tbody id="esg-rows"></tbody>
+    </table>
   </section>
   <section id="quality" hidden>
     <form id="dq-form" class="row">

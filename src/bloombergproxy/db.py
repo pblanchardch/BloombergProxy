@@ -158,6 +158,17 @@ notification = Table(
     schema="app",
 )
 
+vendor_file_raw = Table(
+    "vendor_file_raw", metadata,
+    Column("vendor", String, nullable=False),
+    Column("kind", String, nullable=False),
+    Column("file_name", String, nullable=False),
+    Column("received_at", DateTime, nullable=False),
+    Column("line_no", Integer, nullable=False),
+    Column("payload", String, nullable=False),
+    schema="bronze",
+)
+
 bbg_response_raw = Table(
     "bbg_response_raw", metadata,
     Column("request_id", String, nullable=False),
@@ -233,6 +244,69 @@ timeseries_value = Table(
     Column("recorded_at", DateTime, nullable=False),
     Column("superseded_at", DateTime),
     Column("bbg_request_id", String, nullable=False),
+    Column("source", String, nullable=False, default="BLOOMBERG"),
+    schema="silver",
+)
+
+corporate_action = Table(
+    "corporate_action", metadata,
+    Column("row_id", String, primary_key=True),
+    Column("instrument_id", String, nullable=False),
+    Column("source", String, nullable=False),
+    Column("event_key", String, nullable=False),
+    Column("action_type", String, nullable=False),
+    Column("status", String, nullable=False),
+    Column("ex_date", Date, nullable=False),
+    Column("pay_date", Date),
+    Column("amount", Numeric(18, 6)),
+    Column("currency", String),
+    Column("ratio", Numeric(18, 6)),
+    Column("request_id", String),
+    Column("recorded_at", DateTime, nullable=False),
+    Column("superseded_at", DateTime),
+    schema="silver",
+)
+
+issuer = Table(
+    "issuer", metadata,
+    Column("issuer_id", String, primary_key=True),
+    Column("name", String),
+    Column("lei", String),
+    Column("country", String),
+    Column("industry", String),
+    schema="silver",
+)
+
+security = Table(
+    "security", metadata,
+    Column("instrument_id", String, primary_key=True),
+    Column("issuer_id", String),
+    Column("security_type", String),
+    Column("currency", String),
+    Column("composite_figi", String),
+    Column("share_class_figi", String),
+    schema="silver",
+)
+
+listing = Table(
+    "listing", metadata,
+    Column("figi", String, primary_key=True),
+    Column("instrument_id", String, nullable=False),
+    Column("exchange_code", String),
+    Column("ticker", String),
+    Column("currency", String),
+    Column("is_primary", Boolean),
+    schema="silver",
+)
+
+identifier_xref = Table(
+    "identifier_xref", metadata,
+    Column("scheme", String, primary_key=True),
+    Column("value", String, primary_key=True),
+    Column("source", String, primary_key=True),
+    Column("instrument_id", String, nullable=False),
+    Column("first_seen", DateTime),
+    Column("last_seen", DateTime),
     schema="silver",
 )
 

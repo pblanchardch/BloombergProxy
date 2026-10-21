@@ -32,4 +32,4 @@ def test_bitemporal_query(client, service):
 
     csv = client.get(base + "&format=csv", headers=ALICE)
     assert csv.headers["content-type"].startswith("text/csv")
-    assert csv.text.splitlines()[0] == "date,value,recordedAt"
+    assert csv.text.splitlines()[0] == "date,value,recordedAt,source"

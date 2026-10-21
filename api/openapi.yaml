@@ -183,6 +183,10 @@ paths:
           in: query
           description: Wissensstand zu diesem Zeitpunkt (bitemporal). Ohne Angabe gilt der aktuelle Stand.
           schema: { type: string, format: date-time }
+        - name: source
+          in: query
+          description: Nur diese Quelle (BLOOMBERG oder Anbieter). Ohne Angabe Golden Copy – je Tag die Quelle mit dem höchsten Rang (A4).
+          schema: { type: string }
         - { name: format, in: query, schema: { type: string, enum: [json, csv], default: json } }
       responses:
         '200':
@@ -213,6 +217,130 @@ paths:
           content:
             application/json:
               schema: { type: array, items: { $ref: '#/components/schemas/Field' } }
+
+  /instruments/{instrumentId}/sources:
+    get:
+      tags: [Instrumente]
+      summary: Quellen mit Werten zum Instrument, nach Rang der Golden Copy (A4)
+      parameters: [ { $ref: '#/components/parameters/InstrumentId' } ]
+      responses:
+        '200': { description: Quellen, content: { application/json: { schema: { type: array, items: { type: string } } } } }
+
+  /vendors/{vendor}/xref:
+    post:
+      tags: [Katalog]
+      summary: Anbieter-Kennungen über die ISIN zuordnen (A4)
+      description: CSV mit Kopfzeile Kennungstyp;Kennung;ISIN. Rolle lizenz.admin.
+      parameters:
+        - { name: vendor, in: path, required: true, schema: { type: string, pattern: '^[A-Za-z][A-Za-z0-9_]{1,19}$' } }
+        - { name: fileName, in: query, schema: { type: string } }
+      requestBody: { required: true, content: { text/csv: { schema: { type: string } } } }
+      responses:
+        '200': { description: Ergebnis, content: { application/json: { schema: { $ref: '#/components/schemas/ImportResult' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /vendors/{vendor}/values:
+    post:
+      tags: [Zeitreihen]
+      summary: Werte eines Anbieters importieren (A4)
+      description: |
+        CSV mit Kopfzeile Kennungstyp;Kennung;Datum;Feld;Wert. Die Kennung kann jedes bekannte Schema
+        sein, auch eine zugeordnete Anbieter-Kennung. Werte werden bitemporal mit dem Anbieter als
+        Quelle gespeichert. Rolle lizenz.admin.
+      parameters:
+        - { name: vendor, in: path, required: true, schema: { type: string, pattern: '^[A-Za-z][A-Za-z0-9_]{1,19}$' } }
+        - { name: fileName, in: query, schema: { type: string } }
+      requestBody: { required: true, content: { text/csv: { schema: { type: string } } } }
+      responses:
+        '200': { description: Ergebnis, content: { application/json: { schema: { $ref: '#/components/schemas/ImportResult' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /esg:
+    get:
+      tags: [Zeitreihen]
+      summary: ESG-Scores aller Quellen, vergleichbar gemacht (A3)
+      description: |
+        Je Quelle der letzte ESG_SCORE, umgerechnet auf 0–100 (höher = besser) gemäss der
+        konfigurierten Skala (Zahlenbereich oder Buchstabenfolge). divergent = die Quellen liegen
+        weiter als die Schwelle (Standard 25 Punkte) auseinander. Nutzungsrechte der Kategorie ESG
+        gelten (B4).
+      parameters:
+        - { name: instrumentId, in: query, schema: { type: string }, description: Ohne Angabe das ganze Universum }
+      responses:
+        '200':
+          description: Übersicht je Instrument
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    instrumentId: { type: string }
+                    name: { type: [string, 'null'] }
+                    scores:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          source: { type: string }
+                          raw: { type: string }
+                          date: { type: string, format: date }
+                          normalized: { type: [number, 'null'] }
+                    average: { type: [number, 'null'] }
+                    spread: { type: [number, 'null'] }
+                    divergent: { type: boolean }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /corporate-actions:
+    get:
+      tags: [Zeitreihen]
+      summary: Corporate Actions, Golden Copy (A2)
+      description: |
+        Meldungen verschiedener Quellen zum selben Instrument, derselben Art und demselben Ex-Datum
+        bilden ein Ereignis; massgebend ist die Quelle mit dem höchsten Rang. ``mismatch`` nennt
+        abweichende Attribute (zusätzlich Datenqualitäts-Ausnahme CA_MISMATCH).
+      parameters:
+        - { name: instrumentId, in: query, schema: { type: string } }
+        - { name: from, in: query, schema: { type: string, format: date }, description: Ex-Datum ab }
+        - { name: to, in: query, schema: { type: string, format: date }, description: Ex-Datum bis }
+        - { name: source, in: query, schema: { type: string }, description: Nur Meldungen dieser Quelle }
+      responses:
+        '200':
+          description: Ereignisse nach Ex-Datum
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/CorporateAction' } }
+
+  /vendors/{vendor}/corporate-actions:
+    post:
+      tags: [Zeitreihen]
+      summary: Corporate Actions eines Anbieters importieren (A2)
+      description: |
+        CSV mit Kopfzeile Kennungstyp;Kennung;EreignisId;Art;Status;ExDatum;Zahltag;Betrag;Waehrung;Verhaeltnis.
+        Art: DVD_CASH, STOCK_SPLIT, RIGHTS_ISSUE, MERGER, NAME_CHANGE, OTHER. Status: ANNOUNCED,
+        CONFIRMED, CANCELLED. Rolle lizenz.admin.
+      parameters:
+        - { name: vendor, in: path, required: true, schema: { type: string, pattern: '^[A-Za-z][A-Za-z0-9_]{1,19}$' } }
+        - { name: fileName, in: query, schema: { type: string } }
+      requestBody: { required: true, content: { text/csv: { schema: { type: string } } } }
+      responses:
+        '200':
+          description: Ergebnis
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  vendor: { type: string }
+                  new: { type: integer }
+                  changed: { type: integer }
+                  mismatches: { type: integer }
+                  skipped: { type: array, items: { type: object } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
 
   /field-sets:
     get:
@@ -409,7 +537,7 @@ paths:
       summary: Letzte Benachrichtigungen (D4)
       description: |
         Ereignisse: ORDER_PENDING_APPROVAL, ORDER_REJECTED, DELIVERY_ERRORS, RECONCILE_BLOCKED,
-        DQ_EXCEPTIONS, DAILY_RUN_FAILED. Versand per Webhook (Teams-Karte oder JSON) nach dem Commit.
+        DQ_EXCEPTIONS, DAILY_RUN_FAILED, ID_CONFLICT, CORPORATE_ACTION (Splits, Annullierungen). Versand per Webhook (Teams-Karte oder JSON) nach dem Commit.
       parameters:
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 100 } }
       responses:
@@ -573,12 +701,37 @@ components:
         pricePerInstrument: { type: number }
         currency: { type: string, example: CHF }
         validFrom: { type: string, format: date }
+    CorporateAction:
+      type: object
+      properties:
+        instrumentId: { type: string }
+        actionType: { type: string, enum: [DVD_CASH, STOCK_SPLIT, RIGHTS_ISSUE, MERGER, NAME_CHANGE, OTHER] }
+        exDate: { type: string, format: date }
+        status: { type: string, enum: [ANNOUNCED, CONFIRMED, CANCELLED] }
+        payDate: { type: [string, 'null'], format: date }
+        amount: { type: [string, 'null'] }
+        currency: { type: [string, 'null'] }
+        ratio: { type: [string, 'null'] }
+        source: { type: string, description: Massgebende Quelle }
+        sources: { type: array, items: { type: string } }
+        mismatch: { type: array, items: { type: string, enum: [status, pay_date, amount, currency, ratio] } }
+    ImportResult:
+      type: object
+      properties:
+        vendor: { type: string }
+        mapped: { type: integer }
+        values: { type: integer }
+        corrections: { type: integer }
+        skipped:
+          type: array
+          items: { type: object, properties: { line: { type: integer }, reason: { type: string } } }
     TimeSeries:
       type: object
       properties:
         instrumentId: { type: string }
         field: { type: string }
         asOf: { type: string, format: date-time }
+        source: { type: string, description: GOLDEN oder die angefragte Quelle }
         points:
           type: array
           items:
@@ -587,6 +740,7 @@ components:
               date: { type: string, format: date }
               value: { type: [number, string, 'null'] }
               recordedAt: { type: string, format: date-time, description: Zeitpunkt, zu dem der Wert bekannt wurde }
+              source: { type: string }
     Job:
       type: object
       properties:
@@ -655,7 +809,7 @@ components:
       type: object
       properties:
         id: { type: string }
-        type: { type: string, enum: [STALE_PRICE, OUTLIER, MISSING_VALUE] }
+        type: { type: string, enum: [STALE_PRICE, OUTLIER, MISSING_VALUE, SOURCE_MISMATCH, ID_CONFLICT, CA_MISMATCH] }
         instrumentId: { type: string }
         field: { type: string }
         date: { type: string, format: date }
