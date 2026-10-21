@@ -11,6 +11,10 @@ from bloombergproxy.config import Settings
 from bloombergproxy.main import create_app
 from bloombergproxy.service import LicenseService
 
+REFERENCE_FULL = ["ID_ISIN", "ID_BB_GLOBAL", "COMPOSITE_FIGI", "ID_CUSIP", "ID_SEDOL1", "PARSEKYABLE_DES",
+                  "EXCH_CODE", "CRNCY", "ID_BB_COMPANY", "ISSUER", "LEGAL_ENTITY_IDENTIFIER",
+                  "CNTRY_OF_DOMICILE", "INDUSTRY_SECTOR", "SECURITY_TYP"]
+
 # Testpreise, nicht die Vertragswerte.
 PRICES = {"Pricing": Decimal("1.50"), "SecurityMaster": Decimal("0.80")}
 
@@ -43,12 +47,13 @@ def service(clock, bloomberg):
             {"mnemonic": "PX_VOLUME", "description": "Volumen", "category": "Pricing"},
             {"mnemonic": "NAME", "description": "Name", "category": "SecurityMaster"},
             {"mnemonic": "ESG_SCORE", "description": "ESG-Score", "category": "ESG"},
-        ])
+        ] + [{"mnemonic": m, "description": m, "category": "SecurityMaster"} for m in REFERENCE_FULL])
         conn.execute(insert(db.field_set), [
             {"field_set_id": "PRICING_EOD", "name": "Preise Tagesende"},
             {"field_set_id": "PRICING_VOL", "name": "Nur Volumen"},
             {"field_set_id": "REFERENCE", "name": "Stammdaten"},
             {"field_set_id": "ESG", "name": "ESG"},
+            {"field_set_id": "REFERENCE_FULL", "name": "Stammdaten vollständig"},
         ])
         conn.execute(insert(db.field_set_field), [
             {"field_set_id": "PRICING_EOD", "mnemonic": "PX_LAST"},
@@ -56,7 +61,7 @@ def service(clock, bloomberg):
             {"field_set_id": "PRICING_VOL", "mnemonic": "PX_VOLUME"},
             {"field_set_id": "REFERENCE", "mnemonic": "NAME"},
             {"field_set_id": "ESG", "mnemonic": "ESG_SCORE"},
-        ])
+        ] + [{"field_set_id": "REFERENCE_FULL", "mnemonic": m} for m in ["NAME", *REFERENCE_FULL]])
         conn.execute(insert(db.pricing_category), [
             {"category": c, "valid_from": date(2026, 1, 1), "price_per_instrument": p, "currency": "CHF"}
             for c, p in PRICES.items()

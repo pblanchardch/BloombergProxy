@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     approval_threshold: Decimal = Decimal("200")
     currency: str = "CHF"
 
+    # Golden Copy (A4): Rangfolge der Quellen; nicht genannte Anbieter folgen alphabetisch.
+    source_precedence: list[str] = ["BLOOMBERG"]
+
     # Backfill (C2): Abrechnungskategorie für Historien-Anfragen und maximaler Zeitraum.
     # Annahme: Bloomberg rechnet Historie je Instrument und Monat ab; mit dem Vertrag abgleichen.
     history_category: str = "History"
@@ -21,6 +24,7 @@ class Settings(BaseSettings):
     # Datenqualität (D1)
     dq_stale_days: int = 3          # PX_LAST so viele Liefertage unverändert -> STALE_PRICE
     dq_outlier_share: float = 0.2   # Veränderung zum Vortag über 20 % -> OUTLIER
+    dq_source_tolerance: float = 0.02  # Quellen weichen beim Preis um über 2 % ab -> SOURCE_MISMATCH
 
     # Xentis-Positionsdatei (CSV). Spaltennamen an den tatsächlichen Export anpassen.
     xentis_delimiter: str = ";"

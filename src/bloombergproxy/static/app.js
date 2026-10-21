@@ -138,15 +138,18 @@ async function openSeries(id, label) {
   $("ts-from").value ||= start.toISOString().slice(0, 10);
   $("ts-to").value ||= end.toISOString().slice(0, 10);
   $("series").hidden = false;
+  const sources = await api(`/instruments/${id}/sources`);
+  $("ts-source").innerHTML = `<option value="">Golden Copy</option>` + sources.map((s) => `<option>${esc(s)}</option>`).join("");
   await loadSeries();
 }
 async function loadSeries() {
   const q = new URLSearchParams({ instrumentId: seriesId, field: $("ts-field").value, from: $("ts-from").value, to: $("ts-to").value });
   if ($("ts-asof").value) q.set("asOf", new Date($("ts-asof").value).toISOString().slice(0, 19));
+  if ($("ts-source").value) q.set("source", $("ts-source").value);
   const ts = await api(`/timeseries?${q}`);
   $("ts-rows").innerHTML = ts.points.slice().reverse().map((p) => `<tr><td>${esc(p.date)}</td>
-    <td class="num">${esc(num(p.value))}</td><td class="hint">${esc(new Date(p.recordedAt + "Z").toLocaleString("de-CH"))}</td></tr>`).join("")
-    || `<tr><td colspan="3" class="hint">Keine Werte im Zeitraum</td></tr>`;
+    <td class="num">${esc(num(p.value))}</td><td>${esc(p.source)}</td><td class="hint">${esc(new Date(p.recordedAt + "Z").toLocaleString("de-CH"))}</td></tr>`).join("")
+    || `<tr><td colspan="4" class="hint">Keine Werte im Zeitraum</td></tr>`;
 }
 $("ts-form").addEventListener("submit", (e) => { e.preventDefault(); guard(loadSeries); });
 $("ts-close").addEventListener("click", () => ($("series").hidden = true));
@@ -180,6 +183,20 @@ async function reconcile(dryRun) {
 }
 $("x-dry").addEventListener("click", () => guard(() => reconcile(true)));
 $("x-run").addEventListener("click", () => guard(() => reconcile(false)));
+
+// Daten anderer Anbieter (A4)
+$("v-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  guard(async () => {
+    const file = $("v-file").files[0];
+    if (!file) throw new Error("Bitte eine Datei wählen");
+    const r = await api(`/vendors/${encodeURIComponent($("v-name").value)}/${$("v-kind").value}?fileName=${encodeURIComponent(file.name)}`,
+      { method: "POST", body: await file.arrayBuffer(), headers: { "Content-Type": "text/csv" } });
+    $("v-result").innerHTML = `<p>${esc(r.vendor)}: ${r.mapped ?? r.values} übernommen`
+      + `${r.corrections ? `, ${r.corrections} Korrekturen` : ""}`
+      + `${r.skipped.length ? `, <span class="warn">${r.skipped.length} Zeilen übersprungen (${esc(r.skipped.slice(0, 3).map((s) => `Zeile ${s.line}: ${s.reason}`).join("; "))})</span>` : ""}.</p>`;
+  });
+});
 
 // Bestellen
 async function loadFieldSets() {

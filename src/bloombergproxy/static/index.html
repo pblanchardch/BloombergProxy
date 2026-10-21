@@ -48,16 +48,27 @@
       </form>
       <div id="x-result"></div>
     </details>
+    <details class="card">
+      <summary>Daten anderer Anbieter (Rolle lizenz.admin)</summary>
+      <form id="v-form" class="row">
+        <label>Anbieter <input id="v-name" placeholder="z. B. MSCI" required></label>
+        <label>Art <select id="v-kind"><option value="values">Werte (Kennungstyp;Kennung;Datum;Feld;Wert)</option><option value="xref">Zuordnung (Kennungstyp;Kennung;ISIN)</option></select></label>
+        <label>Datei (CSV) <input id="v-file" type="file" accept=".csv,text/csv"></label>
+        <button>Importieren</button>
+      </form>
+      <div id="v-result"></div>
+    </details>
     <div id="series" class="card" hidden>
       <div class="row"><strong id="ts-title"></strong><button type="button" id="ts-close">Schliessen</button></div>
       <form id="ts-form" class="row">
-        <label>Feld <select id="ts-field"><option>PX_LAST</option><option>PX_VOLUME</option><option>NAME</option><option>CRNCY</option></select></label>
+        <label>Feld <select id="ts-field"><option>PX_LAST</option><option>PX_VOLUME</option><option>NAME</option><option>CRNCY</option><option>ESG_SCORE</option></select></label>
         <label>Von <input id="ts-from" type="date"></label>
         <label>Bis <input id="ts-to" type="date"></label>
         <label>Wissensstand per (optional) <input id="ts-asof" type="datetime-local"></label>
+        <label>Quelle <select id="ts-source"><option value="">Golden Copy</option></select></label>
         <button>Anzeigen</button>
       </form>
-      <table><thead><tr><th>Datum</th><th>Wert</th><th>Bekannt seit</th></tr></thead><tbody id="ts-rows"></tbody></table>
+      <table><thead><tr><th>Datum</th><th>Wert</th><th>Quelle</th><th>Bekannt seit</th></tr></thead><tbody id="ts-rows"></tbody></table>
     </div>
     <table>
       <thead><tr><th>Identifier</th><th>Status</th><th>Quelle</th><th>Feldlisten</th><th>Kategorien</th><th>Seit</th><th>Abbestellt per</th><th></th></tr></thead>

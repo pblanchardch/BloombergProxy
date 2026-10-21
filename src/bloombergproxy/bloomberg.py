@@ -147,4 +147,47 @@ class MockBloombergClient:
             return "CHF" if code.startswith("CH") else "USD"
         if f == "ESG_SCORE":
             return Decimal(str(round(10 * _unit(identifier, f), 2)))
-        return None
+        return _reference(identifier, code, f)
+
+
+SECTORS = ["Financial", "Consumer, Non-cyclical", "Industrial", "Technology", "Utilities"]
+FIGI_CHARS = "BCDFGHJKLMNPQRSTVWXYZ0123456789"  # FIGI: keine Vokale
+
+
+def _code(seed: str, n: int, chars: str = "ABCDEFGHJKLMNPQRSTUVWXYZ0123456789") -> str:
+    h = hashlib.sha256(seed.encode()).digest()
+    return "".join(chars[b % len(chars)] for b in h[:n])
+
+
+def _reference(identifier: str, code: str, f: str) -> str | None:
+    """Stammdaten wie Bloomberg sie liefert; aus der ISIN abgeleitet, damit sie stabil bleiben."""
+    country = code[:2] if code[:2].isalpha() else "US"
+    exch = "SW" if country == "CH" else ("LN" if country == "GB" else "US")
+    match f:
+        case "ID_ISIN":
+            return code if len(code) == 12 else None
+        case "ID_BB_GLOBAL":
+            return "BBG" + _code(identifier + "figi", 9, FIGI_CHARS)
+        case "COMPOSITE_FIGI":
+            return "BBG" + _code(identifier + "composite", 9, FIGI_CHARS)
+        case "ID_CUSIP":
+            return code[2:11] if country in ("US", "CA") else None
+        case "ID_SEDOL1":
+            return _code(identifier + "sedol", 7, "BCDFGHJKLMNPQRSTVWXYZ0123456789")
+        case "PARSEKYABLE_DES":
+            return f"{_code(identifier + 'ticker', 4, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ')} {exch} Equity"
+        case "EXCH_CODE":
+            return exch
+        case "ID_BB_COMPANY":
+            return str(100000 + int(_unit(identifier, "company") * 900000))
+        case "ISSUER":
+            return f"Mock Emittent {code[2:7]}"
+        case "LEGAL_ENTITY_IDENTIFIER":
+            return _code(identifier + "lei", 18) + "00"
+        case "CNTRY_OF_DOMICILE":
+            return country
+        case "INDUSTRY_SECTOR":
+            return SECTORS[int(_unit(identifier, "sector") * len(SECTORS))]
+        case "SECURITY_TYP":
+            return "Common Stock"
+    return None

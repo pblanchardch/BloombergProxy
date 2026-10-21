@@ -17,9 +17,15 @@ FIELDS = [
     ("NAME", "Name", "SecurityMaster"),
     ("CRNCY", "Währung", "SecurityMaster"),
 ]
+REFERENCE = ["ID_ISIN", "ID_BB_GLOBAL", "COMPOSITE_FIGI", "ID_CUSIP", "ID_SEDOL1", "PARSEKYABLE_DES", "EXCH_CODE",
+             "ID_BB_COMPANY", "ISSUER", "LEGAL_ENTITY_IDENTIFIER", "CNTRY_OF_DOMICILE", "INDUSTRY_SECTOR",
+             "SECURITY_TYP"]
+FIELDS += [(m, m, "SecurityMaster") for m in REFERENCE]
+FIELDS += [("ESG_SCORE", "ESG-Score", "ESG")]
 FIELD_SETS = {
     "PRICING_EOD": ("Preise Tagesende", ["PX_LAST", "PX_VOLUME"]),
-    "REFERENCE": ("Stammdaten", ["NAME", "CRNCY"]),
+    "REFERENCE": ("Stammdaten", ["NAME", "CRNCY", *REFERENCE]),
+    "ESG": ("ESG", ["ESG_SCORE"]),
 }
 PRICES = {"Pricing": Decimal("1.50"), "SecurityMaster": Decimal("0.80")}
 

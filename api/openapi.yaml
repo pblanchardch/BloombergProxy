@@ -183,6 +183,10 @@ paths:
           in: query
           description: Wissensstand zu diesem Zeitpunkt (bitemporal). Ohne Angabe gilt der aktuelle Stand.
           schema: { type: string, format: date-time }
+        - name: source
+          in: query
+          description: Nur diese Quelle (BLOOMBERG oder Anbieter). Ohne Angabe Golden Copy – je Tag die Quelle mit dem höchsten Rang (A4).
+          schema: { type: string }
         - { name: format, in: query, schema: { type: string, enum: [json, csv], default: json } }
       responses:
         '200':
@@ -213,6 +217,45 @@ paths:
           content:
             application/json:
               schema: { type: array, items: { $ref: '#/components/schemas/Field' } }
+
+  /instruments/{instrumentId}/sources:
+    get:
+      tags: [Instrumente]
+      summary: Quellen mit Werten zum Instrument, nach Rang der Golden Copy (A4)
+      parameters: [ { $ref: '#/components/parameters/InstrumentId' } ]
+      responses:
+        '200': { description: Quellen, content: { application/json: { schema: { type: array, items: { type: string } } } } }
+
+  /vendors/{vendor}/xref:
+    post:
+      tags: [Katalog]
+      summary: Anbieter-Kennungen über die ISIN zuordnen (A4)
+      description: CSV mit Kopfzeile Kennungstyp;Kennung;ISIN. Rolle lizenz.admin.
+      parameters:
+        - { name: vendor, in: path, required: true, schema: { type: string, pattern: '^[A-Za-z][A-Za-z0-9_]{1,19}$' } }
+        - { name: fileName, in: query, schema: { type: string } }
+      requestBody: { required: true, content: { text/csv: { schema: { type: string } } } }
+      responses:
+        '200': { description: Ergebnis, content: { application/json: { schema: { $ref: '#/components/schemas/ImportResult' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /vendors/{vendor}/values:
+    post:
+      tags: [Zeitreihen]
+      summary: Werte eines Anbieters importieren (A4)
+      description: |
+        CSV mit Kopfzeile Kennungstyp;Kennung;Datum;Feld;Wert. Die Kennung kann jedes bekannte Schema
+        sein, auch eine zugeordnete Anbieter-Kennung. Werte werden bitemporal mit dem Anbieter als
+        Quelle gespeichert. Rolle lizenz.admin.
+      parameters:
+        - { name: vendor, in: path, required: true, schema: { type: string, pattern: '^[A-Za-z][A-Za-z0-9_]{1,19}$' } }
+        - { name: fileName, in: query, schema: { type: string } }
+      requestBody: { required: true, content: { text/csv: { schema: { type: string } } } }
+      responses:
+        '200': { description: Ergebnis, content: { application/json: { schema: { $ref: '#/components/schemas/ImportResult' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
 
   /field-sets:
     get:
@@ -573,12 +616,23 @@ components:
         pricePerInstrument: { type: number }
         currency: { type: string, example: CHF }
         validFrom: { type: string, format: date }
+    ImportResult:
+      type: object
+      properties:
+        vendor: { type: string }
+        mapped: { type: integer }
+        values: { type: integer }
+        corrections: { type: integer }
+        skipped:
+          type: array
+          items: { type: object, properties: { line: { type: integer }, reason: { type: string } } }
     TimeSeries:
       type: object
       properties:
         instrumentId: { type: string }
         field: { type: string }
         asOf: { type: string, format: date-time }
+        source: { type: string, description: GOLDEN oder die angefragte Quelle }
         points:
           type: array
           items:
@@ -587,6 +641,7 @@ components:
               date: { type: string, format: date }
               value: { type: [number, string, 'null'] }
               recordedAt: { type: string, format: date-time, description: Zeitpunkt, zu dem der Wert bekannt wurde }
+              source: { type: string }
     Job:
       type: object
       properties:
@@ -655,7 +710,7 @@ components:
       type: object
       properties:
         id: { type: string }
-        type: { type: string, enum: [STALE_PRICE, OUTLIER, MISSING_VALUE] }
+        type: { type: string, enum: [STALE_PRICE, OUTLIER, MISSING_VALUE, SOURCE_MISMATCH, ID_CONFLICT] }
         instrumentId: { type: string }
         field: { type: string }
         date: { type: string, format: date }

@@ -85,6 +85,21 @@ Semikolon, Kopfzeile `Stichtag;Portfolio;ISIN;Bestand`, Datum `TT.MM.JJJJ` oder 
 in Schweizer Schreibweise (`1'250.50`). Trennzeichen und Spaltennamen sind über
 `BBGPROXY_XENTIS_*` einstellbar. Zeilen ohne ISIN (z. B. Konten, OTC) werden übersprungen.
 
+## Stammdaten und mehrere Anbieter (A1, A4)
+
+- Bloomberg-Stammdatenfelder (z. B. Feldliste `REFERENCE`) befüllen Emittent, Instrument und
+  Listing (`silver.issuer`, `silver.security`, `silver.listing`) und die Zuordnung aller
+  Kennungen (`silver.identifier_xref`). Ein Instrument wird so unter jeder bekannten Kennung
+  gefunden – eine per ISIN bestellte Aktie gilt auch bei einer Bestellung per FIGI als Duplikat.
+- Daten anderer Anbieter per CSV: `POST /api/v1/vendors/{anbieter}/xref`
+  (`Kennungstyp;Kennung;ISIN`, ordnet Anbieter-Kennungen zu) und
+  `POST /api/v1/vendors/{anbieter}/values` (`Kennungstyp;Kennung;Datum;Feld;Wert`).
+- Golden Copy: Zeitreihen ohne `source` liefern je Tag den Wert der Quelle mit dem höchsten
+  Rang (`BBGPROXY_SOURCE_PRECEDENCE`, Standard `["BLOOMBERG"]`, übrige Anbieter alphabetisch).
+- Datenqualität: `SOURCE_MISMATCH`, wenn Quellen beim Preis um mehr als 2 % abweichen
+  (`BBGPROXY_DQ_SOURCE_TOLERANCE`); `ID_CONFLICT`, wenn eine Kennung zwei Instrumenten
+  zugeordnet würde (die Zuordnung bleibt dann unverändert).
+
 ## Bloomberg-Mock
 
 Bis Zugangsdaten und Katalog-ID der Data License vorliegen, spricht der Service mit

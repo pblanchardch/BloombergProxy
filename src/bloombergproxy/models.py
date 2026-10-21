@@ -133,12 +133,14 @@ class TimeSeriesPoint(ApiModel):
     date: date
     value: Decimal | str | None
     recorded_at: datetime
+    source: str = "BLOOMBERG"
 
 
 class TimeSeries(ApiModel):
     instrument_id: str
     field: str
     as_of: datetime | None
+    source: str = "GOLDEN"  # GOLDEN = je Tag die Quelle mit dem höchsten Rang
     points: list[TimeSeriesPoint]
 
 

@@ -15,6 +15,7 @@ from .db import make_engine
 from .entitlements import Entitlements
 from .quality import DataQuality
 from .reconcile import Reconciler
+from .vendors import VendorImport
 from .service import Conflict, Forbidden, Invalid, LicenseService, NotFound
 
 STATIC = Path(__file__).parent / "static"
@@ -38,6 +39,7 @@ def create_app(settings: Settings | None = None, bloomberg: BloombergClient | No
     app.state.reconciler = Reconciler(app.state.service)
     app.state.quality = DataQuality(app.state.service)
     app.state.entitlements = Entitlements(app.state.service)
+    app.state.vendors = VendorImport(app.state.service)
     app.include_router(router)
 
     @app.middleware("http")
